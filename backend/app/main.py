@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.health import router as health_router
+from app.api.live_game import router as live_game_router
 from app.api.participant import router as participant_router
 from app.api.questions import router as questions_router
 from app.api.sessions import router as sessions_router
@@ -18,9 +19,9 @@ app = FastAPI(
     title=settings.app_name,
     description=(
         "Backend API for the Fun & Technical Activity Platform with SQLite, "
-        "authentication, questions, teams, sessions, and participant endpoints."
+        "authentication, questions, teams, sessions, participant, and live game endpoints."
     ),
-    version="0.6.0",
+    version="0.7.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -41,6 +42,7 @@ app.include_router(questions_router, prefix=settings.api_prefix)
 app.include_router(teams_router, prefix=settings.api_prefix)
 app.include_router(sessions_router, prefix=settings.api_prefix)
 app.include_router(participant_router, prefix=settings.api_prefix)
+app.include_router(live_game_router, prefix=settings.api_prefix)
 
 
 @app.get("/")
