@@ -1,5 +1,4 @@
 import { ArrowLeft, CheckCircle2, ShieldCheck } from "lucide-react";
-import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -16,25 +15,27 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 export function ParticipantConfirmPage() {
   useDocumentTitle("Confirm Team Identity · Fun & Technical Activity Platform");
   const navigate = useNavigate();
-
   const { pendingJoin, confirmJoin } = useParticipant();
 
-  useEffect(() => {
-    // If no pending join data, route back to join
-    if (!pendingJoin) {
-      navigate("/participant/join", { replace: true });
-    }
-  }, [pendingJoin, navigate]);
-
   if (!pendingJoin) {
-    return null;
+    return (
+      <div className="space-y-6 max-w-md mx-auto text-center py-12">
+        <div className="rounded-xl border border-border/70 bg-navy-900/80 p-6">
+          <p className="text-sm font-medium text-foreground">No pending join request found.</p>
+          <p className="text-xs text-muted mt-1">Please enter your session code and team code first.</p>
+          <Button className="mt-4" onClick={() => navigate("/participant/join")}>
+            Go to Join Page
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const { session, team } = pendingJoin;
 
   function handleConfirm() {
     confirmJoin();
-    navigate("/participant/waiting");
+    navigate("/participant/waiting", { replace: true });
   }
 
   return (

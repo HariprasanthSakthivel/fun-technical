@@ -8,7 +8,7 @@
  */
 import { AlertTriangle, ArrowLeft, Eye, EyeOff, Save } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams, useBlocker } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ExplainEditor } from "@/components/admin/ExplainEditor";
 import { GuessTechEditor } from "@/components/admin/GuessTechEditor";
@@ -142,20 +142,32 @@ export function QuestionFormPage() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [isDirty, setIsDirty] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
   const initialValues = useRef(values);
+
+  function handleBack() {
+    if (isDirty) {
+      setShowDiscardModal(true);
+    } else {
+      navigate("/admin/questions");
+    }
+  }
 
   // Track dirtiness
   useEffect(() => {
     const hasChanged =
       JSON.stringify(values) !== JSON.stringify(initialValues.current);
     setIsDirty(hasChanged);
-  }, [values]);
 
-  // Block navigation if dirty
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      isDirty && currentLocation.pathname !== nextLocation.pathname,
-  );
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasChanged) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [values]);
 
   function update(updates: Partial<FormValues>) {
     setValues((prev) => ({ ...prev, ...updates }));
@@ -221,7 +233,7 @@ export function QuestionFormPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate("/admin/questions")}
+            onClick={handleBack}
             type="button"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -423,7 +435,7 @@ export function QuestionFormPage() {
             <Button
               variant="secondary"
               type="button"
-              onClick={() => navigate("/admin/questions")}
+              onClick={handleBack}
             >
               Cancel
             </Button>
@@ -450,7 +462,7 @@ export function QuestionFormPage() {
       </div>
 
       {/* ── Unsaved changes dialog ───────────────────────────────────────── */}
-      <Dialog open={blocker.state === "blocked"}>
+      <Dialog open={showDiscardModal} onOpenChange={setShowDiscardModal}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Unsaved changes</DialogTitle>
@@ -462,14 +474,17 @@ export function QuestionFormPage() {
             <Button
               variant="secondary"
               type="button"
-              onClick={() => blocker.state === "blocked" && blocker.reset()}
+              onClick={() => setShowDiscardModal(false)}
             >
               Stay on page
             </Button>
             <Button
               variant="danger"
               type="button"
-              onClick={() => blocker.state === "blocked" && blocker.proceed()}
+              onClick={() => {
+                setShowDiscardModal(false);
+                navigate("/admin/questions");
+              }}
             >
               Leave without saving
             </Button>

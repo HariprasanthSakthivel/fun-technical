@@ -51,22 +51,53 @@ interface ParticipantContextValue {
 
 const ParticipantContext = createContext<ParticipantContextValue | null>(null);
 
+const STORAGE_KEY_PARTICIPANT = "fta_participant_session";
+const STORAGE_KEY_PENDING = "fta_pending_join";
+
 export function ParticipantProvider({ children }: { children: ReactNode }) {
-  const [currentParticipant, setCurrentParticipant] = useState<ParticipantSessionData | null>(null);
-  const [pendingJoin, setPendingJoin] = useState<{ session: GameSession; team: Team } | null>(null);
+  const [currentParticipant, setCurrentParticipant] = useState<ParticipantSessionData | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PARTICIPANT);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [pendingJoin, setPendingJoinState] = useState<{ session: GameSession; team: Team } | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PENDING);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [buzzerState, setBuzzerState] = useState<BuzzerState>("ready_to_buzz");
   const [unlockedQuestionIndex, setUnlockedQuestionIndex] = useState<number>(0);
   const [submittedAnswer, setSubmittedAnswer] = useState<string>("");
   const [isEligibleToAnswer, setIsEligibleToAnswer] = useState<boolean>(false);
 
+  const setPendingJoin = useCallback((data: { session: GameSession; team: Team } | null) => {
+    setPendingJoinState(data);
+    if (data) {
+      localStorage.setItem(STORAGE_KEY_PENDING, JSON.stringify(data));
+    } else {
+      localStorage.removeItem(STORAGE_KEY_PENDING);
+    }
+  }, []);
+
   const confirmJoin = useCallback(() => {
     if (!pendingJoin) return;
-    setCurrentParticipant({
+    const participantData: ParticipantSessionData = {
       session: pendingJoin.session,
       team: pendingJoin.team,
       joinedAt: new Date().toISOString(),
-    });
-    setPendingJoin(null);
+    };
+    setCurrentParticipant(participantData);
+    localStorage.setItem(STORAGE_KEY_PARTICIPANT, JSON.stringify(participantData));
+    localStorage.removeItem(STORAGE_KEY_PENDING);
+    setPendingJoinState(null);
     setBuzzerState("ready_to_buzz");
     setSubmittedAnswer("");
     setIsEligibleToAnswer(false);
@@ -74,7 +105,9 @@ export function ParticipantProvider({ children }: { children: ReactNode }) {
 
   const leaveSession = useCallback(() => {
     setCurrentParticipant(null);
-    setPendingJoin(null);
+    setPendingJoinState(null);
+    localStorage.removeItem(STORAGE_KEY_PARTICIPANT);
+    localStorage.removeItem(STORAGE_KEY_PENDING);
     setBuzzerState("waiting_for_question");
     setSubmittedAnswer("");
     setIsEligibleToAnswer(false);
