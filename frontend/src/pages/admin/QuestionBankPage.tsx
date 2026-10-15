@@ -179,7 +179,7 @@ export function QuestionBankPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-3">
         <Card className="p-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted">Total</p>
           <p className="mt-1 font-display text-2xl font-bold text-foreground">{stats.total}</p>
@@ -191,18 +191,6 @@ export function QuestionBankPage() {
         <Card className="p-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-accent-purple-bright">Explain W/O</p>
           <p className="mt-1 font-display text-2xl font-bold text-foreground">{stats.explain}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-success">Ready</p>
-          <p className="mt-1 font-display text-2xl font-bold text-foreground">{stats.ready}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-warning">Draft</p>
-          <p className="mt-1 font-display text-2xl font-bold text-foreground">{stats.draft}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted">Archived</p>
-          <p className="mt-1 font-display text-2xl font-bold text-foreground">{stats.archived}</p>
         </Card>
       </div>
 
