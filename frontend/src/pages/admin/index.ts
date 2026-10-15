@@ -1,0 +1,11 @@
+export { AdminDashboardPage } from "./AdminDashboardPage";
+export { AdminLoginPage } from "./AdminLoginPage";
+export { CreateSessionPage } from "./CreateSessionPage";
+export { GamesPage } from "./GamesPage";
+export { LiveSessionsPage } from "./LiveSessionsPage";
+export { QuestionBankPage } from "./QuestionBankPage";
+export { QuestionFormPage } from "./QuestionFormPage";
+export { ResultsPage } from "./ResultsPage";
+export { ScoreboardPage } from "./ScoreboardPage";
+export { SettingsPage } from "./SettingsPage";
+export { TeamsPage } from "./TeamsPage";
