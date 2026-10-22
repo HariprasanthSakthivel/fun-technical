@@ -46,7 +46,7 @@ export const toast = {
   warning: (message: string) => _add("warning", message),
 };
 
-/** Use inside a component to read the live toast list. */
+/** Use inside a component to read the toast list. */
 export function useToastStore(): ToastItem[] {
   const [items, setItems] = useState<ToastItem[]>([..._toasts]);
 

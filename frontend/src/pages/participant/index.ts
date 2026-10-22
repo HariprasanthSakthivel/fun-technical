@@ -1,4 +1,4 @@
-export { ParticipantConfirmPage } from "./ParticipantConfirmPage";
-export { ParticipantGamePage } from "./ParticipantGamePage";
-export { ParticipantJoinPage } from "./ParticipantJoinPage";
-export { ParticipantWaitingPage } from "./ParticipantWaitingPage";
+export { ParticipantTeamPage } from "./ParticipantTeamPage";
+export { ParticipantTechDetectivePage } from "./ParticipantTechDetectivePage";
+export { ParticipantLightningTalksPage } from "./ParticipantLightningTalksPage";
+export { ParticipantCustomGamePage } from "./ParticipantCustomGamePage";

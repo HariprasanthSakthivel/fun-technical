@@ -1,4 +1,4 @@
-"""Pydantic schemas for request validation and response models."""
+"""Pydantic schemas for request validation and response models in Fun Friday Activities Platform."""
 
 from datetime import datetime
 from typing import Any, Literal
@@ -12,12 +12,22 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=2, max_length=64)
+    display_name: str = Field(..., min_length=2, max_length=128)
+    password: str = Field(..., min_length=4)
+    email: str | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: int
     username: str
+    display_name: str
     role: str
+    team_id: str | None = None
+    team_name: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -25,47 +35,22 @@ class UserResponse(BaseModel):
 
     id: int
     username: str
+    display_name: str
     email: str | None = None
     role: str
     is_active: bool
-    created_at: datetime
+    is_logged_in: bool
+    last_login_at: datetime | None = None
+    team_id: str | None = None
+    team_name: str | None = None
 
 
 # ── Team Schemas ───────────────────────────────────────────────────────────────
 
-class TeamMemberBase(BaseModel):
-    member_name: str
-    member_identifier: str | None = None
-
-
-class TeamMemberResponse(TeamMemberBase):
-    model_config = ConfigDict(from_attributes=True)
+class TeamMemberInfo(BaseModel):
     id: int
-
-
-class TeamCreate(BaseModel):
-    id: str | None = None  # e.g. "T01"
-    team_name: str = Field(..., min_length=1, max_length=128)
-    team_code: str = Field(..., min_length=2, max_length=32)
-    description: str | None = None
-    team_leader: str | None = None
-    member_count: int = Field(default=4, ge=1)
-    status: Literal["active", "inactive"] = "active"
-    members: list[str] | None = None  # list of member names
-
-
-class TeamUpdate(BaseModel):
-    team_name: str | None = None
-    team_code: str | None = None
-    description: str | None = None
-    team_leader: str | None = None
-    member_count: int | None = None
-    status: Literal["active", "inactive"] | None = None
-    members: list[str] | None = None
-
-
-class TeamStatusUpdate(BaseModel):
-    status: Literal["active", "inactive"]
+    username: str
+    display_name: str
 
 
 class TeamResponse(BaseModel):
@@ -74,195 +59,347 @@ class TeamResponse(BaseModel):
     id: str
     team_name: str
     team_code: str
-    description: str | None = None
-    team_leader: str | None = None
-    member_count: int
-    status: str
-    created_at: datetime
-    updated_at: datetime
-    member_names: list[str] = []
-    sessions_participated: int = 0
+    tech_detective_score: int
+    lightning_talks_score: int
+    total_score: int
+    rank: int
+    members: list[TeamMemberInfo] = []
 
 
-# ── Question Schemas ───────────────────────────────────────────────────────────
+class TeamNameUpdate(BaseModel):
+    team_name: str = Field(..., min_length=1, max_length=128)
 
-class QuestionImageSchema(BaseModel):
-    id: str
-    name: str
-    dataUrl: str
-    size: int
-    mimeType: str
+
+class RandomizeTeamsRequest(BaseModel):
+    team_size: int = Field(default=2, ge=2, le=50, description="Target number of members per team")
+    include_all: bool = Field(default=False, description="If True, includes all registered participants, even if offline")
+
+
+
+# ── Game 1: Tech Detective Schemas ─────────────────────────────────────────────
+
+class TechDetectiveImage(BaseModel):
+    id: int
+    url: str
     caption: str | None = None
 
 
-class QuestionCreate(BaseModel):
-    id: str | None = None
-    game_type: Literal["guess-tech", "explain-without-naming"]
+class QuestionCreateRequest(BaseModel):
+    question_number: int = Field(..., ge=1)
     title: str = Field(..., min_length=1, max_length=256)
-    instructions: str | None = None
-    content_type: Literal["text", "image", "multiple-images", "text-images"] = "text"
-    text_content: str | None = None
-    images_data: list[dict[str, Any]] | None = None
-
-    secret_topic: str | None = None
-    topic_description: str | None = None
-    prohibited_words: list[str] | None = None
-    admin_instructions: str | None = None
-    estimated_time: int | None = None
-    technology_category: str | None = None
-
-    correct_answer: str = Field(..., min_length=1)
-    accepted_answers: list[str] | None = None
-    explanation: str | None = None
-
-    difficulty: Literal["easy", "medium", "hard"] = "medium"
-    question_order: int = 1
-    status: Literal["ready", "draft", "archived"] = "draft"
+    technology_name: str = Field(..., min_length=1, max_length=128)
+    images: list[str] = Field(..., min_length=1, max_length=10, description="1 image URL or Base64 data URL")
+    accepted_answers: list[str] = []
+    points: int = Field(default=10, ge=1, le=100)
+    deduction: int = Field(default=2, ge=0, le=50)
 
 
-class QuestionUpdate(BaseModel):
-    game_type: Literal["guess-tech", "explain-without-naming"] | None = None
+class QuestionUpdateRequest(BaseModel):
     title: str | None = None
-    instructions: str | None = None
-    content_type: Literal["text", "image", "multiple-images", "text-images"] | None = None
-    text_content: str | None = None
-    images_data: list[dict[str, Any]] | None = None
-
-    secret_topic: str | None = None
-    topic_description: str | None = None
-    prohibited_words: list[str] | None = None
-    admin_instructions: str | None = None
-    estimated_time: int | None = None
-    technology_category: str | None = None
-
-    correct_answer: str | None = None
+    technology_name: str | None = None
+    images: list[str] | None = None
     accepted_answers: list[str] | None = None
-    explanation: str | None = None
-
-    difficulty: Literal["easy", "medium", "hard"] | None = None
-    question_order: int | None = None
-    status: Literal["ready", "draft", "archived"] | None = None
+    points: int | None = None
+    deduction: int | None = None
 
 
-class AdminQuestionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class TechDetectiveQuestionAdminResponse(BaseModel):
     id: str
-    game_type: str
+    question_number: int
     title: str
-    instructions: str | None = None
-    content_type: str
-    text_content: str | None = None
-    images_data: list[dict[str, Any]] | None = None
-
-    secret_topic: str | None = None
-    topic_description: str | None = None
-    prohibited_words: list[str] | None = None
-    admin_instructions: str | None = None
-    estimated_time: int | None = None
-    technology_category: str | None = None
-
-    correct_answer: str
-    accepted_answers: list[str] | None = None
-    explanation: str | None = None
-
-    difficulty: str
-    question_order: int
-    status: str
-    created_at: datetime
-    updated_at: datetime
+    technology_name: str
+    images: list[dict[str, Any]]
+    accepted_answers: list[str]
+    clue_description: str | None = None
+    points: int = 10
+    deduction: int = 2
+    is_unlocked: bool
+    unlocked_at: datetime | None = None
+    is_completed: bool
 
 
-class ParticipantQuestionResponse(BaseModel):
-    """Public participant response model strictly omitting confidential answers."""
-    model_config = ConfigDict(from_attributes=True)
-
+class TechDetectiveQuestionParticipantResponse(BaseModel):
+    """Participant view: answers and secret solutions are completely stripped."""
     id: str
-    game_type: str
+    question_number: int
     title: str
-    instructions: str | None = None
-    content_type: str
-    text_content: str | None = None
-    images_data: list[dict[str, Any]] | None = None
-    difficulty: str
-    question_order: int
-
-    # For Explain Without Naming: only included if the requesting participant is the explaining team
-    secret_topic: str | None = None
-    prohibited_words: list[str] | None = None
-    topic_description: str | None = None
-    is_explaining_team: bool = False
+    images: list[dict[str, Any]]
+    points: int = 10
+    is_unlocked: bool
 
 
-# ── Game Session Schemas ───────────────────────────────────────────────────────
-
-class GameRulesSchema(BaseModel):
-    maxEligibleTeams: int = 3
-    answerSubmission: str = "eligible_only"
-    correctAnswerReveal: str = "manual"
-    questionProgression: str = "manual"
-    scoreboardVisibility: str = "hidden"
-    questionTimerSeconds: int | None = 60
-    enableBuzzer: bool = True
-
-
-class SessionCreate(BaseModel):
-    id: str | None = None
-    session_name: str = Field(..., min_length=1, max_length=256)
-    description: str | None = None
-    game_type: Literal["guess-tech", "explain-without-naming"]
-    status: Literal["draft", "ready"] = "draft"
-    scheduled_at: str | None = None
-    question_ids: list[str] = Field(default_factory=list)
-    team_ids: list[str] = Field(default_factory=list)
-    game_rules: dict[str, Any] | None = None
-
-
-class SessionUpdate(BaseModel):
-    session_name: str | None = None
-    description: str | None = None
-    game_type: Literal["guess-tech", "explain-without-naming"] | None = None
-    status: Literal["draft", "ready", "live", "completed", "cancelled"] | None = None
-    scheduled_at: str | None = None
-    question_ids: list[str] | None = None
-    team_ids: list[str] | None = None
-    game_rules: dict[str, Any] | None = None
-
-
-class SessionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    session_code: str
-    session_name: str
-    description: str | None = None
-    game_type: str
-    status: str
-    scheduled_at: str | None = None
-    game_rules: dict[str, Any] | None = None
-    created_at: datetime
-    updated_at: datetime
-    question_ids: list[str] = []
-    team_ids: list[str] = []
-    total_questions: int = 0
-
-
-# ── Participant Schemas ────────────────────────────────────────────────────────
-
-class ParticipantJoinRequest(BaseModel):
-    session_code: str = Field(..., min_length=2, max_length=32)
-    team_code: str = Field(..., min_length=2, max_length=32)
-
-
-class ParticipantJoinResponse(BaseModel):
-    session_id: str
-    session_code: str
-    session_name: str
-    game_type: str
-    session_status: str
+class QuestionWiseTeamScore(BaseModel):
     team_id: str
     team_name: str
-    team_code: str
-    participating_teams_count: int
-    total_questions_count: int
-    participant_token: str
+    question_scores: dict[str, int]  # e.g. {"1": 10, "2": -2}
+    total_score: int
+
+
+class QuestionWiseScoreResponse(BaseModel):
+    questions: list[dict[str, Any]]  # [{"question_number": 1, "points": 10}, ...]
+    team_scores: list[QuestionWiseTeamScore]
+
+
+class BuzzerEntry(BaseModel):
+    id: int
+    team_id: str
+    team_name: str
+    position: int
+    pressed_at: datetime
+
+
+class BuzzerQueueResponse(BaseModel):
+    question_id: str
+    is_buzzer_open: bool
+    buzzers: list[BuzzerEntry]
+    current_answering_team_id: str | None = None
+    current_answering_position: int | None = None
+
+
+class EvaluateAnswerRequest(BaseModel):
+    team_id: str
+    buzzer_position: int = Field(..., ge=1, le=3)
+    is_correct: bool
+    answer_text: str | None = ""
+
+
+class TechDetectiveLeaderboardEntry(BaseModel):
+    rank: int
+    team_id: str
+    team_name: str
+    score: int
+
+
+class EditTechScoreRequest(BaseModel):
+    score: int
+
+
+# ── Game 2: Lightning Talks Schemas ────────────────────────────────────────────
+
+class LightningTopicAdminResponse(BaseModel):
+    id: str
+    topic_name: str
+    description: str | None = None
+    prohibited_words: list[str] = []
+    assigned_user_id: int | None = None
+    assigned_user_name: str | None = None
+    assigned_team_id: str | None = None
+    assigned_team_name: str | None = None
+    is_unlocked: bool
+    unlocked_at: datetime | None = None
+    duration_seconds: int = 60
+
+
+class LightningTopicParticipantResponse(BaseModel):
+    """Topic information provided to active speaker."""
+    id: str
+    topic_name: str
+    description: str | None = None
+    prohibited_words: list[str] = []
+    is_unlocked: bool
+    duration_seconds: int = 60
+
+
+class EvaluateLightningSpeechRequest(BaseModel):
+    user_id: int
+    team_id: str
+    topic_id: str
+    time_management_score: int = Field(..., ge=0, le=10, description="How effectively participant used the 1 minute")
+    words_used_score: int = Field(..., ge=0, le=10, description="Vocabulary used & avoided saying topic name")
+    understandability_score: int = Field(..., ge=0, le=10, description="Clarity and comprehensibility")
+    admin_notes: str | None = None
+
+
+class ManualTopicAssignRequest(BaseModel):
+    user_id: int
+    team_id: str
+    topic_name: str = Field(..., min_length=1, max_length=256)
+    description: str | None = None
+    prohibited_words: list[str] = []
+
+
+class CreateTopicRequest(BaseModel):
+    topic_name: str = Field(..., min_length=1, max_length=256)
+    description: str | None = None
+    prohibited_words: list[str] = []
+    assigned_user_id: int | None = None
+    assigned_team_id: str | None = None
+
+
+class LightningLeaderboardEntry(BaseModel):
+    rank: int
+    team_id: str
+    team_name: str
+    score: int
+
+
+class EditLightningScoreRequest(BaseModel):
+    score: int
+
+
+# ── Final Combined Leaderboard Schemas ─────────────────────────────────────────
+
+class FinalLeaderboardEntry(BaseModel):
+    rank: int
+    team_id: str
+    team_name: str
+    tech_detective_score: int
+    lightning_talks_score: int
+    total_score: int
+
+
+class EditFinalScoreRequest(BaseModel):
+    tech_detective_score: int | None = None
+    lightning_talks_score: int | None = None
+
+
+# ── Synchronized Dynamic Timer Schemas ─────────────────────────────────────────
+
+class GameTimerResponse(BaseModel):
+    total_duration: int
+    seconds_remaining: float
+    is_running: bool
+    end_time: float | None = None
+    game: str = "all"
+    current_game: str = "lobby"
+
+
+class GameTimerControlRequest(BaseModel):
+    action: Literal["start", "pause", "resume", "reset", "set_duration", "add_time"]
+    duration_seconds: int | None = None
+    game: str | None = None
+
+
+# ── Dynamic Game Catalog & Custom Activities Schemas ──────────────────────────
+
+class GameResponse(BaseModel):
+    id: str
+    game_code: str
+    title: str
+    subtitle: str | None = None
+    description: str | None = None
+    game_type: str = "custom"
+    icon: str = "gamepad"
+    default_timer_seconds: int = 60
+    rules: list[str] = []
+    is_active: bool = True
+    order_index: int = 1
+    question_count: int = 0
+    created_at: datetime | None = None
+
+
+class CreateGameRequest(BaseModel):
+    title: str = Field(..., min_length=2, max_length=128)
+    game_code: str | None = None
+    subtitle: str | None = None
+    description: str | None = None
+    game_type: str = Field(default="custom", description="buzzer, speech, trivia, challenge, custom")
+    icon: str = Field(default="gamepad", description="gamepad, zap, mic, code, trophy, lightbulb, flame")
+    default_timer_seconds: int = Field(default=60, ge=10, le=1800)
+    rules: list[str] = []
+    is_active: bool = True
+
+
+class UpdateGameRequest(BaseModel):
+    title: str | None = None
+    subtitle: str | None = None
+    description: str | None = None
+    game_type: str | None = None
+    icon: str | None = None
+    default_timer_seconds: int | None = None
+    rules: list[str] | None = None
+    is_active: bool | None = None
+
+
+class AwardGameScoreRequest(BaseModel):
+    team_id: str
+    game_code: str
+    score: int
+    is_incremental: bool = False  # If true, adds score to existing; if false, sets absolute score
+    notes: str | None = None
+
+
+class TeamGameScoreResponse(BaseModel):
+    team_id: str
+    team_name: str
+    game_code: str
+    score: int
+    total_team_score: int
+
+
+class TeamGameScoreDetailResponse(BaseModel):
+    id: int
+    team_id: str
+    game_code: str
+    score: int
+    notes: str | None = None
+    updated_at: str | None = None
+
+
+class GameQuestionResponse(BaseModel):
+    id: str
+    game_id: str
+    game_code: str
+    question_number: int
+    title: str
+    description: str | None = None
+    question_type: str = "quiz"
+    options: list[str] = []
+    correct_answer: str | None = None
+    accepted_answers: list[str] = []
+    image_url: str | None = None
+    media_type: str = "none"
+    media_url: str | None = None
+    points: int = 10
+    deduction: int = 0
+    time_limit_seconds: int | None = 60
+    is_unlocked: bool = False
+    unlocked_at: datetime | None = None
+    is_completed: bool = False
+    is_buzzer_open: bool = False
+    current_answering_team_id: str | None = None
+    current_answering_position: int | None = None
+    created_at: datetime
+
+
+class EvaluateCustomGameAnswerRequest(BaseModel):
+    question_id: str
+    team_id: str
+    buzzer_position: int = Field(..., ge=1, le=3)
+    is_correct: bool
+    answer_text: str | None = ""
+
+
+class CreateGameQuestionRequest(BaseModel):
+    title: str = Field(..., min_length=2, max_length=256)
+    question_number: int | None = None
+    description: str | None = None
+    question_type: str = "quiz"
+    options: list[str] = []
+    correct_answer: str | None = None
+    accepted_answers: list[str] = []
+    image_url: str | None = None
+    media_type: str = "none"
+    media_url: str | None = None
+    points: int = 10
+    deduction: int = 0
+    time_limit_seconds: int | None = 60
+
+
+class UpdateGameQuestionRequest(BaseModel):
+    title: str | None = None
+    question_number: int | None = None
+    description: str | None = None
+    question_type: str | None = None
+    options: list[str] | None = None
+    correct_answer: str | None = None
+    accepted_answers: list[str] | None = None
+    image_url: str | None = None
+    media_type: str | None = None
+    media_url: str | None = None
+    points: int | None = None
+    deduction: int | None = None
+    time_limit_seconds: int | None = None
+
+
+

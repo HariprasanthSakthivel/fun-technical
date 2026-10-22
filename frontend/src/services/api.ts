@@ -1,15 +1,46 @@
 /**
- * Centralized API client for Fun & Technical Activity Platform.
+ * Centralized API client for Fun Friday Activities Platform (aXtrLabs).
  * Communicates with the FastAPI SQLite backend.
  */
-import type { HealthResponse, Question, Team, GameSession } from "@/types";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-
-// Auth token storage keys
-const TOKEN_KEY = "fta_admin_token";
-const USER_KEY = "fta_user_profile";
-const PARTICIPANT_TOKEN_KEY = "fta_participant_token";
+import type {
+  BuzzerQueue,
+  CreateLightningTopicPayload,
+  CreateQuestionPayload,
+  FinalLeaderboardItem,
+  LightningLeaderboardItem,
+  LightningTopicAdmin,
+  LightningTopicParticipant,
+  ManualTopicAssignPayload,
+  QuestionWiseScoreResponse,
+  RegisterPayload,
+  Team,
+  TechDetectiveLeaderboardItem,
+  TechDetectiveQuestionAdmin,
+  TechDetectiveQuestionParticipant,
+  UserProfile,
+  GameTimer,
+  GameTimerControlPayload,
+  GameItem,
+  CreateGamePayload,
+  UpdateGamePayload,
+  TeamGameScore,
+  AwardGameScorePayload,
+  GameQuestion,
+  CreateGameQuestionPayload,
+  EvaluateCustomGameAnswerPayload,
+} from "@/types";
+const getBaseUrl = (): string => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.trim();
+  }
+  if (typeof window !== "undefined" && window.location.hostname) {
+    return `http://${window.location.hostname}:8000`;
+  }
+  return "http://localhost:8000";
+};
+const API_BASE_URL: string = getBaseUrl().replace(/\/+$/, "");
+const TOKEN_KEY = "ffa_auth_token";
+const USER_KEY = "ffa_user_profile";
 
 export function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -24,16 +55,18 @@ export function removeAuthToken(): void {
   localStorage.removeItem(USER_KEY);
 }
 
-export function getParticipantToken(): string | null {
-  return localStorage.getItem(PARTICIPANT_TOKEN_KEY);
+export function getSavedUserProfile(): UserProfile | null {
+  const raw = localStorage.getItem(USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
-export function setParticipantToken(token: string): void {
-  localStorage.setItem(PARTICIPANT_TOKEN_KEY, token);
-}
-
-export function removeParticipantToken(): void {
-  localStorage.removeItem(PARTICIPANT_TOKEN_KEY);
+export function setSavedUserProfile(profile: UserProfile): void {
+  localStorage.setItem(USER_KEY, JSON.stringify(profile));
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -48,7 +81,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set("Content-Type", "application/json");
   }
 
-  const url = `${API_BASE_URL}${endpoint}`;
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const url = `${API_BASE_URL}${cleanEndpoint}`;
   const response = await fetch(url, {
     ...options,
     headers,
@@ -68,348 +102,456 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return data as T;
 }
 
-// ── Health API ────────────────────────────────────────────────────────────────
-export async function fetchHealth(): Promise<HealthResponse> {
-  return request<HealthResponse>("/api/health");
-}
-
-export function getApiBaseUrl(): string {
-  return API_BASE_URL;
-}
-
 // ── Auth APIs ─────────────────────────────────────────────────────────────────
-export interface LoginPayload {
-  username: string;
-  password: string;
-}
 
 export interface LoginResponse {
   access_token: string;
   token_type: string;
-  user: {
-    id: number;
-    username: string;
-    email: string | null;
-    role: string;
-    is_active: boolean;
-  };
+  user_id: number;
+  username: string;
+  display_name: string;
+  role: "admin" | "participant";
+  team_id?: string | null;
+  team_name?: string | null;
 }
 
-export async function loginAdmin(credentials: LoginPayload): Promise<LoginResponse> {
-  const data = await request<LoginResponse>("/api/auth/login", {
+export async function loginUser(username: string, password: string): Promise<LoginResponse> {
+  const res = await request<LoginResponse>("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify(credentials),
+    body: JSON.stringify({ username, password }),
   });
-  setAuthToken(data.access_token);
-  localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-  return data;
+  setAuthToken(res.access_token);
+  setSavedUserProfile({
+    id: res.user_id,
+    username: res.username,
+    display_name: res.display_name,
+    role: res.role,
+    is_active: true,
+    is_logged_in: true,
+    team_id: res.team_id,
+    team_name: res.team_name,
+  });
+  return res;
 }
 
-export async function getCurrentUserProfile(): Promise<LoginResponse["user"]> {
-  return request<LoginResponse["user"]>("/api/auth/me");
-}
-
-// ── Questions APIs ─────────────────────────────────────────────────────────────
-export async function apiGetQuestions(params?: {
-  game_type?: string;
-  status?: string;
-  difficulty?: string;
-  content_type?: string;
-  search?: string;
-}): Promise<Question[]> {
-  const searchParams = new URLSearchParams();
-  if (params?.game_type) searchParams.set("game_type", params.game_type);
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.difficulty) searchParams.set("difficulty", params.difficulty);
-  if (params?.content_type) searchParams.set("content_type", params.content_type);
-  if (params?.search) searchParams.set("search", params.search);
-
-  const qs = searchParams.toString();
-  const rawList = await request<any[]>(`/api/questions${qs ? `?${qs}` : ""}`);
-
-  // Map backend snake_case to frontend camelCase Question model
-  return rawList.map(mapBackendQuestionToFrontend);
-}
-
-export async function apiGetQuestion(id: string): Promise<Question> {
-  const raw = await request<any>(`/api/questions/${id}`);
-  return mapBackendQuestionToFrontend(raw);
-}
-
-export async function apiCreateQuestion(question: Partial<Question>): Promise<Question> {
-  const payload = mapFrontendQuestionToBackend(question);
-  const raw = await request<any>("/api/questions", {
+export async function registerUser(payload: RegisterPayload): Promise<LoginResponse> {
+  const res = await request<LoginResponse>("/api/auth/register", {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return mapBackendQuestionToFrontend(raw);
-}
-
-export async function apiUpdateQuestion(id: string, updates: Partial<Question>): Promise<Question> {
-  const payload = mapFrontendQuestionToBackend(updates);
-  const raw = await request<any>(`/api/questions/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
+  setAuthToken(res.access_token);
+  setSavedUserProfile({
+    id: res.user_id,
+    username: res.username,
+    display_name: res.display_name,
+    role: res.role,
+    is_active: true,
+    is_logged_in: true,
+    team_id: res.team_id,
+    team_name: res.team_name,
   });
-  return mapBackendQuestionToFrontend(raw);
+  return res;
 }
 
-export async function apiDeleteQuestion(id: string): Promise<void> {
-  await request<void>(`/api/questions/${id}`, {
-    method: "DELETE",
+export async function logoutUser(): Promise<void> {
+  try {
+    await request("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Silent catch
+  } finally {
+    removeAuthToken();
+  }
+}
+
+export async function fetchProfile(): Promise<UserProfile> {
+  const profile = await request<UserProfile>("/api/auth/me");
+  setSavedUserProfile(profile);
+  return profile;
+}
+
+export async function fetchLoggedInUsers(): Promise<UserProfile[]> {
+  return request<UserProfile[]>("/api/auth/logged-in-users?all_users=true");
+}
+
+export async function fetchAllParticipants(): Promise<UserProfile[]> {
+  return request<UserProfile[]>("/api/auth/all-participants");
+}
+
+export async function resetDatabase(): Promise<{ message: string }> {
+  return request<{ message: string }>("/api/auth/reset-database", {
+    method: "POST",
   });
 }
 
 // ── Teams APIs ────────────────────────────────────────────────────────────────
-export async function apiGetTeams(params?: { status?: string; search?: string }): Promise<Team[]> {
-  const searchParams = new URLSearchParams();
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.search) searchParams.set("search", params.search);
 
-  const qs = searchParams.toString();
-  const rawList = await request<any[]>(`/api/teams${qs ? `?${qs}` : ""}`);
-  return rawList.map(mapBackendTeamToFrontend);
+export async function fetchTeams(): Promise<Team[]> {
+  return request<Team[]>("/api/teams");
 }
 
-export async function apiGetTeam(id: string): Promise<Team> {
-  const raw = await request<any>(`/api/teams/${id}`);
-  return mapBackendTeamToFrontend(raw);
+export async function fetchMyTeam(): Promise<Team> {
+  return request<Team>("/api/teams/my-team");
 }
 
-export async function apiCreateTeam(team: Partial<Team>): Promise<Team> {
-  const payload = {
-    id: team.id,
-    team_name: team.name,
-    team_code: team.code,
-    description: team.description,
-    team_leader: team.leaderName,
-    member_count: team.members || 1,
-    status: team.status || "active",
-    member_names: team.memberNames || [],
-  };
-  const raw = await request<any>("/api/teams", {
+export async function randomizeTeams(teamSize: number = 2, includeAll: boolean = true): Promise<Team[]> {
+  return request<Team[]>("/api/teams/randomize", {
+    method: "POST",
+    body: JSON.stringify({ team_size: teamSize, include_all: includeAll }),
+  });
+}
+
+export async function updateTeamName(teamId: string, teamName: string): Promise<Team> {
+  return request<Team>(`/api/teams/${teamId}/name`, {
+    method: "PUT",
+    body: JSON.stringify({ team_name: teamName }),
+  });
+}
+
+// ── Game 1: Tech Detective APIs ───────────────────────────────────────────────
+
+export async function fetchTechDetectiveQuestionsAdmin(): Promise<TechDetectiveQuestionAdmin[]> {
+  return request<TechDetectiveQuestionAdmin[]>("/api/tech-detective/questions/admin");
+}
+
+export async function createTechDetectiveQuestion(
+  payload: CreateQuestionPayload
+): Promise<TechDetectiveQuestionAdmin> {
+  return request<TechDetectiveQuestionAdmin>("/api/tech-detective/questions", {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return mapBackendTeamToFrontend(raw);
 }
 
-export async function apiUpdateTeam(id: string, updates: Partial<Team>): Promise<Team> {
-  const payload: any = {};
-  if (updates.name !== undefined) payload.team_name = updates.name;
-  if (updates.code !== undefined) payload.team_code = updates.code;
-  if (updates.description !== undefined) payload.description = updates.description;
-  if (updates.leaderName !== undefined) payload.team_leader = updates.leaderName;
-  if (updates.members !== undefined) payload.member_count = updates.members;
-  if (updates.status !== undefined) payload.status = updates.status;
-  if (updates.memberNames !== undefined) payload.member_names = updates.memberNames;
-
-  const raw = await request<any>(`/api/teams/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-  return mapBackendTeamToFrontend(raw);
-}
-
-export async function apiDeleteTeam(id: string): Promise<void> {
-  await request<void>(`/api/teams/${id}`, {
+export async function deleteTechDetectiveQuestion(questionId: string): Promise<{ message: string }> {
+  return request(`/api/tech-detective/questions/${questionId}`, {
     method: "DELETE",
   });
 }
 
-// ── Sessions APIs ─────────────────────────────────────────────────────────────
-export async function apiGetSessions(params?: { game_type?: string; status?: string }): Promise<GameSession[]> {
-  const searchParams = new URLSearchParams();
-  if (params?.game_type) searchParams.set("game_type", params.game_type);
-  if (params?.status) searchParams.set("status", params.status);
-
-  const qs = searchParams.toString();
-  const rawList = await request<any[]>(`/api/sessions${qs ? `?${qs}` : ""}`);
-  return rawList.map(mapBackendSessionToFrontend);
+export async function fetchTechDetectiveActiveQuestion(): Promise<TechDetectiveQuestionParticipant | null> {
+  return request<TechDetectiveQuestionParticipant | null>("/api/tech-detective/active-question");
 }
 
-export async function apiCreateSession(session: Partial<GameSession>): Promise<GameSession> {
-  const payload = {
-    id: session.id,
-    session_name: session.name,
-    description: session.description,
-    game_type: session.gameType,
-    status: session.status || "draft",
-    session_code: session.code,
-    scheduled_date: session.scheduledDate,
-    scheduled_time: session.scheduledTime,
-    rules: session.rules,
-    question_ids: session.questionIds || [],
-    team_ids: session.teamIds || [],
-  };
-  const raw = await request<any>("/api/sessions", {
+export async function fetchTechDetectiveScoreBreakdown(): Promise<QuestionWiseScoreResponse> {
+  return request<QuestionWiseScoreResponse>("/api/tech-detective/score-breakdown");
+}
+
+export async function unlockTechDetectiveQuestion(
+  questionId: string
+): Promise<{ message: string; question_id: string; question_number: number }> {
+  return request(`/api/tech-detective/unlock/${questionId}`, {
+    method: "POST",
+  });
+}
+
+export async function pressBuzzer(): Promise<{ message: string; position: number; team_id: string }> {
+  return request("/api/tech-detective/buzz", {
+    method: "POST",
+  });
+}
+
+export async function fetchBuzzerQueue(questionId: string): Promise<BuzzerQueue> {
+  return request<BuzzerQueue>(`/api/tech-detective/buzzer-queue/${questionId}`);
+}
+
+export async function evaluateTechDetectiveAnswer(payload: {
+  team_id: string;
+  buzzer_position: number;
+  is_correct: boolean;
+  answer_text?: string;
+}): Promise<{
+  success: boolean;
+  team_id: string;
+  team_name: string;
+  buzzer_position: number;
+  is_correct: boolean;
+  points_awarded: number;
+  new_score: number;
+  next_team_id?: string | null;
+  next_position?: number | null;
+  is_question_completed: boolean;
+}> {
+  return request("/api/tech-detective/evaluate", {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return mapBackendSessionToFrontend(raw);
 }
 
-export async function apiUpdateSession(id: string, updates: Partial<GameSession>): Promise<GameSession> {
-  const payload: any = {};
-  if (updates.name !== undefined) payload.session_name = updates.name;
-  if (updates.description !== undefined) payload.description = updates.description;
-  if (updates.gameType !== undefined) payload.game_type = updates.gameType;
-  if (updates.status !== undefined) payload.status = updates.status;
-  if (updates.scheduledDate !== undefined) payload.scheduled_date = updates.scheduledDate;
-  if (updates.scheduledTime !== undefined) payload.scheduled_time = updates.scheduledTime;
-  if (updates.rules !== undefined) payload.rules = updates.rules;
-  if (updates.questionIds !== undefined) payload.question_ids = updates.questionIds;
-  if (updates.teamIds !== undefined) payload.team_ids = updates.teamIds;
+export async function fetchTechDetectiveLeaderboard(): Promise<TechDetectiveLeaderboardItem[]> {
+  return request<TechDetectiveLeaderboardItem[]>("/api/tech-detective/leaderboard");
+}
 
-  const raw = await request<any>(`/api/sessions/${id}`, {
+export async function editTechDetectiveScore(teamId: string, score: number): Promise<TechDetectiveLeaderboardItem> {
+  return request<TechDetectiveLeaderboardItem>(`/api/tech-detective/leaderboard/${teamId}`, {
+    method: "PUT",
+    body: JSON.stringify({ score }),
+  });
+}
+
+export async function transitionToGame2(): Promise<{ message: string }> {
+  return request("/api/tech-detective/transition-to-game2", {
+    method: "POST",
+  });
+}
+
+// ── Game 2: Lightning Talks APIs ──────────────────────────────────────────────
+
+export async function fetchLightningTopicsAdmin(): Promise<LightningTopicAdmin[]> {
+  return request<LightningTopicAdmin[]>("/api/lightning-talks/topics/admin");
+}
+
+export async function fetchMyActiveLightningTopic(): Promise<LightningTopicParticipant | null> {
+  return request<LightningTopicParticipant | null>("/api/lightning-talks/active-topic");
+}
+
+export async function createLightningTopic(
+  payload: CreateLightningTopicPayload
+): Promise<LightningTopicAdmin> {
+  return request<LightningTopicAdmin>("/api/lightning-talks/topics", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteLightningTopic(topicId: string): Promise<{ message: string }> {
+  return request(`/api/lightning-talks/topics/${topicId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function manualAssignLightningTopic(
+  payload: ManualTopicAssignPayload
+): Promise<LightningTopicAdmin> {
+  return request<LightningTopicAdmin>("/api/lightning-talks/manual-assign", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function unlockLightningTopic(topicId: string): Promise<{
+  message: string;
+  topic_id: string;
+  topic_name: string;
+  assigned_user_id: number;
+  duration_seconds: number;
+}> {
+  return request(`/api/lightning-talks/unlock/${topicId}`, {
+    method: "POST",
+  });
+}
+
+export async function evaluateLightningSpeech(payload: {
+  user_id: number;
+  team_id: string;
+  topic_id: string;
+  time_management_score: number;
+  words_used_score: number;
+  understandability_score: number;
+  admin_notes?: string;
+}): Promise<{
+  success: boolean;
+  team_id: string;
+  team_name: string;
+  total_speech_score: number;
+  new_lightning_score: number;
+  new_total_score: number;
+}> {
+  return request("/api/lightning-talks/evaluate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchLightningLeaderboard(): Promise<LightningLeaderboardItem[]> {
+  return request<LightningLeaderboardItem[]>("/api/lightning-talks/scores");
+}
+
+export async function editLightningScore(teamId: string, score: number): Promise<LightningLeaderboardItem> {
+  return request<LightningLeaderboardItem>(`/api/lightning-talks/scores/${teamId}`, {
+    method: "PUT",
+    body: JSON.stringify({ score }),
+  });
+}
+
+// ── Final Combined Leaderboard APIs ───────────────────────────────────────────
+
+export async function fetchFinalLeaderboard(): Promise<FinalLeaderboardItem[]> {
+  return request<FinalLeaderboardItem[]>("/api/leaderboard/final");
+}
+
+export async function editFinalScore(
+  teamId: string,
+  scores: { tech_detective_score?: number; lightning_talks_score?: number }
+): Promise<FinalLeaderboardItem> {
+  return request<FinalLeaderboardItem>(`/api/leaderboard/edit/${teamId}`, {
+    method: "PUT",
+    body: JSON.stringify(scores),
+  });
+}
+
+// ── Dynamic Synchronized Game Timer APIs ──────────────────────────────────────
+
+export async function fetchGameTimer(): Promise<GameTimer> {
+  return request<GameTimer>("/api/timer");
+}
+
+export async function controlGameTimer(payload: GameTimerControlPayload): Promise<GameTimer> {
+  return request<GameTimer>("/api/timer/control", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+// ── Dynamic Games Catalog & Custom Activities APIs ──────────────────────────
+
+export async function fetchGames(): Promise<GameItem[]> {
+  return request<GameItem[]>("/api/games");
+}
+
+export async function createGame(payload: CreateGamePayload): Promise<GameItem> {
+  return request<GameItem>("/api/games", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateGame(gameId: string, payload: UpdateGamePayload): Promise<GameItem> {
+  return request<GameItem>(`/api/games/${gameId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
-  return mapBackendSessionToFrontend(raw);
 }
 
-export async function apiSetSessionReady(id: string): Promise<GameSession> {
-  const raw = await request<any>(`/api/sessions/${id}/ready`, { method: "POST" });
-  return mapBackendSessionToFrontend(raw);
+export async function deleteGame(gameId: string): Promise<{ message: string; game_id: string }> {
+  return request(`/api/games/${gameId}`, {
+    method: "DELETE",
+  });
 }
 
-export async function apiStartSession(id: string): Promise<GameSession> {
-  const raw = await request<any>(`/api/sessions/${id}/start`, { method: "POST" });
-  return mapBackendSessionToFrontend(raw);
+export async function activateGame(gameId: string): Promise<{ message: string; game: GameItem }> {
+  return request(`/api/games/${gameId}/activate`, {
+    method: "POST",
+  });
 }
 
-export async function apiCancelSession(id: string): Promise<GameSession> {
-  const raw = await request<any>(`/api/sessions/${id}/cancel`, { method: "POST" });
-  return mapBackendSessionToFrontend(raw);
-}
-
-// ── Participant APIs ──────────────────────────────────────────────────────────
-export interface ParticipantJoinPayload {
-  session_code: string;
-  team_code: string;
-}
-
-export interface ParticipantJoinResponse {
-  session_id: string;
-  session_code: string;
-  session_name: string;
-  game_type: string;
-  session_status: string;
-  team_id: string;
-  team_name: string;
-  team_code: string;
-  participant_token: string;
-}
-
-export async function apiJoinSession(payload: ParticipantJoinPayload): Promise<ParticipantJoinResponse> {
-  const data = await request<ParticipantJoinResponse>("/api/participant/join", {
+export async function awardGameScore(payload: AwardGameScorePayload): Promise<TeamGameScore> {
+  return request<TeamGameScore>("/api/games/scores", {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  setParticipantToken(data.participant_token);
-  return data;
 }
 
-export async function apiGetCurrentQuestion(sessionCode: string): Promise<any> {
-  const pToken = getParticipantToken();
-  const headers: Record<string, string> = {};
-  if (pToken) {
-    headers["Authorization"] = `Bearer ${pToken}`;
-  }
-  return request<any>(`/api/participant/sessions/${sessionCode}/current-question`, {
-    headers,
+export async function fetchGameScores(gameCode?: string): Promise<TeamGameScore[]> {
+  const query = gameCode ? `?game_code=${encodeURIComponent(gameCode)}` : "";
+  return request<TeamGameScore[]>(`/api/games/scores${query}`);
+}
+
+export async function fetchGameQuestions(gameIdOrCode: string): Promise<GameQuestion[]> {
+  return request<GameQuestion[]>(`/api/games/${encodeURIComponent(gameIdOrCode)}/questions`);
+}
+
+export async function createGameQuestion(
+  gameIdOrCode: string,
+  payload: CreateGameQuestionPayload
+): Promise<GameQuestion> {
+  return request<GameQuestion>(`/api/games/${encodeURIComponent(gameIdOrCode)}/questions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
-// ── Mappers ───────────────────────────────────────────────────────────────────
-function mapBackendQuestionToFrontend(b: any): Question {
-  return {
-    id: b.id,
-    gameType: b.game_type,
-    title: b.title,
-    instructions: b.instructions,
-    contentType: b.content_type,
-    textContent: b.text_content,
-    images: b.images || [],
-    technologyCategory: b.technology_category,
-    secretTopic: b.secret_topic,
-    topicDescription: b.topic_description,
-    prohibitedWords: b.prohibited_words || [],
-    adminInstructions: b.admin_instructions,
-    estimatedTime: b.estimated_time,
-    correctAnswer: b.correct_answer,
-    acceptedAnswers: b.accepted_answers || [],
-    explanation: b.explanation,
-    difficulty: b.difficulty,
-    order: b.question_order,
-    status: b.status,
-    createdAt: b.created_at ? b.created_at.split("T")[0] : "",
-    updatedAt: b.updated_at ? b.updated_at.split("T")[0] : "",
-  };
+export async function deleteGameQuestion(
+  questionId: string
+): Promise<{ message: string; question_id: string }> {
+  return request(`/api/games/questions/${encodeURIComponent(questionId)}`, {
+    method: "DELETE",
+  });
 }
 
-function mapFrontendQuestionToBackend(f: Partial<Question>): any {
-  const b: any = {};
-  if (f.id !== undefined) b.id = f.id;
-  if (f.gameType !== undefined) b.game_type = f.gameType;
-  if (f.title !== undefined) b.title = f.title;
-  if (f.instructions !== undefined) b.instructions = f.instructions;
-  if (f.contentType !== undefined) b.content_type = f.contentType;
-  if (f.textContent !== undefined) b.text_content = f.textContent;
-  if (f.images !== undefined) b.images = f.images;
-  if (f.technologyCategory !== undefined) b.technology_category = f.technologyCategory;
-  if (f.secretTopic !== undefined) b.secret_topic = f.secretTopic;
-  if (f.topicDescription !== undefined) b.topic_description = f.topicDescription;
-  if (f.prohibitedWords !== undefined) b.prohibited_words = f.prohibitedWords;
-  if (f.adminInstructions !== undefined) b.admin_instructions = f.adminInstructions;
-  if (f.estimatedTime !== undefined) b.estimated_time = f.estimatedTime;
-  if (f.correctAnswer !== undefined) b.correct_answer = f.correctAnswer;
-  if (f.acceptedAnswers !== undefined) b.accepted_answers = f.acceptedAnswers;
-  if (f.explanation !== undefined) b.explanation = f.explanation;
-  if (f.difficulty !== undefined) b.difficulty = f.difficulty;
-  if (f.order !== undefined) b.question_order = f.order;
-  if (f.status !== undefined) b.status = f.status;
-  return b;
+export async function unlockGameQuestion(questionId: string): Promise<GameQuestion> {
+  return request<GameQuestion>(`/api/games/questions/${encodeURIComponent(questionId)}/unlock`, {
+    method: "POST",
+  });
 }
 
-function mapBackendTeamToFrontend(b: any): Team {
-  return {
-    id: b.id,
-    name: b.team_name,
-    code: b.team_code,
-    description: b.description,
-    leaderName: b.team_leader,
-    members: b.member_count,
-    memberNames: b.member_names || [],
-    status: b.status,
-    sessionsParticipated: b.sessions_participated || 0,
-    createdAt: b.created_at ? b.created_at.split("T")[0] : "",
-    updatedAt: b.updated_at ? b.updated_at.split("T")[0] : "",
-  };
+export async function fetchActiveGameQuestion(gameIdOrCode: string): Promise<GameQuestion | null> {
+  return request<GameQuestion | null>(`/api/games/${encodeURIComponent(gameIdOrCode)}/active-question`);
 }
 
-function mapBackendSessionToFrontend(b: any): GameSession {
-  return {
-    id: b.id,
-    code: b.session_code,
-    name: b.session_name,
-    description: b.description,
-    gameType: b.game_type,
-    status: b.status,
-    questionIds: b.question_ids || [],
-    teamIds: b.team_ids || [],
-    rules: b.rules || {
-      maxEligibleTeams: 3,
-      answerSubmission: "eligible_only",
-      correctAnswerReveal: "manual",
-      questionProgression: "manual",
-      scoreboardVisibility: "hidden",
-      enableBuzzer: true,
-    },
-    scheduledDate: b.scheduled_date,
-    scheduledTime: b.scheduled_time,
-    totalQuestions: b.total_questions || (b.question_ids ? b.question_ids.length : 0),
-    createdAt: b.created_at ? b.created_at.split("T")[0] : "",
-    updatedAt: b.updated_at ? b.updated_at.split("T")[0] : "",
-  };
+export async function uploadMediaFile(
+  file: File
+): Promise<{ url: string; media_type: string; filename: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request<{ url: string; media_type: string; filename: string }>(
+    "/api/games/upload-media",
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
 }
+
+export function getFullMediaUrl(url?: string | null): string {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+    return url;
+  }
+  const clean = url.startsWith("/") ? url : `/${url}`;
+  return `${API_BASE_URL}${clean}`;
+}
+
+export async function pressCustomGameBuzzer(
+  gameIdOrCode: string
+): Promise<{ message: string; position: number; team_id: string }> {
+  return request<{ message: string; position: number; team_id: string }>(
+    `/api/games/${encodeURIComponent(gameIdOrCode)}/buzz`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+export async function fetchCustomGameBuzzerQueue(
+  gameIdOrCode: string,
+  questionId: string
+): Promise<BuzzerQueue> {
+  return request<BuzzerQueue>(
+    `/api/games/${encodeURIComponent(gameIdOrCode)}/buzzer-queue/${encodeURIComponent(questionId)}`
+  );
+}
+
+export async function evaluateCustomGameAnswer(
+  gameIdOrCode: string,
+  payload: EvaluateCustomGameAnswerPayload
+): Promise<{
+  message: string;
+  is_correct: boolean;
+  points_awarded: number;
+  next_answering_team_id?: string | null;
+  next_answering_position?: number | null;
+  is_completed?: boolean;
+}> {
+  return request(
+    `/api/games/${encodeURIComponent(gameIdOrCode)}/evaluate`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function resetCustomGameBuzzer(
+  gameIdOrCode: string,
+  questionId: string
+): Promise<{ message: string; question_id: string }> {
+  return request(
+    `/api/games/${encodeURIComponent(gameIdOrCode)}/reset-buzzer/${encodeURIComponent(questionId)}`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+
+

@@ -1,28 +1,31 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", "Sora", ui-sans-serif, system-ui, sans-serif;
 
-  --color-navy-950: #070b16;
-  --color-navy-900: #0b1224;
-  --color-navy-800: #121a33;
-  --color-navy-700: #1a2547;
-  --color-navy-600: #24325c;
+  /* aXtrLabs Obsidian Enterprise Palette */
+  --color-navy-950: #050505;
+  --color-navy-900: #09090b;
+  --color-navy-800: #121215;
+  --color-navy-700: #18181b;
+  --color-navy-600: #27272a;
 
-  --color-accent-blue: #3b82f6;
-  --color-accent-blue-bright: #60a5fa;
-  --color-accent-purple: #8b5cf6;
-  --color-accent-purple-bright: #a78bfa;
+  /* Brand White & Platinum Accents */
+  --color-accent-blue: #ffffff;
+  --color-accent-blue-bright: #f4f4f5;
+  --color-accent-purple: #e4e4e7;
+  --color-accent-purple-bright: #ffffff;
 
-  --color-surface: #111827;
-  --color-surface-elevated: #162036;
-  --color-border: #2a3658;
-  --color-muted: #94a3b8;
-  --color-foreground: #e8eefc;
-  --color-success: #34d399;
-  --color-warning: #fbbf24;
-  --color-danger: #f87171;
+  /* High-tech Surfaces & Contrast */
+  --color-surface: #09090b;
+  --color-surface-elevated: #121215;
+  --color-border: #27272a;
+  --color-muted: #a1a1aa;
+  --color-foreground: #ffffff;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #f43f5e;
 }
 
 @layer base {
@@ -34,6 +37,7 @@
 
   html {
     scroll-behavior: smooth;
+    color-scheme: dark;
   }
 
   body {
@@ -42,9 +46,9 @@
     font-family: var(--font-sans);
     color: var(--color-foreground);
     background:
-      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(59, 130, 246, 0.22), transparent 55%),
-      radial-gradient(ellipse 70% 45% at 90% 0%, rgba(139, 92, 246, 0.18), transparent 50%),
-      linear-gradient(180deg, var(--color-navy-950) 0%, var(--color-navy-900) 45%, #0a1020 100%);
+      radial-gradient(circle 800px at 50% -200px, rgba(255, 255, 255, 0.05), transparent 70%),
+      radial-gradient(circle 600px at 80% 20%, rgba(255, 255, 255, 0.02), transparent 50%),
+      linear-gradient(180deg, #000000 0%, #050505 40%, #09090b 100%);
     background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -60,14 +64,14 @@
   }
 
   ::selection {
-    background: rgba(59, 130, 246, 0.35);
-    color: white;
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
   }
 }
 
 @layer utilities {
   .text-gradient {
-    background: linear-gradient(135deg, var(--color-accent-blue-bright), var(--color-accent-purple-bright));
+    background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -75,7 +79,17 @@
 
   .glow-ring {
     box-shadow:
-      0 0 0 1px rgba(96, 165, 250, 0.25),
-      0 12px 40px rgba(15, 23, 42, 0.45);
+      0 0 0 1px rgba(255, 255, 255, 0.15),
+      0 12px 40px rgba(0, 0, 0, 0.85);
+  }
+
+  .axtr-card {
+    background: rgba(18, 18, 21, 0.85);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .axtr-card:hover {
+    border-color: rgba(255, 255, 255, 0.18);
   }
 }

@@ -1,77 +1,112 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-
-import { ParticipantProvider } from "@/context/ParticipantContext";
-import { QuestionsProvider } from "@/context/QuestionsContext";
-import { SessionsProvider } from "@/context/SessionsContext";
-import { TeamsProvider } from "@/context/TeamsContext";
-import { AdminLayout } from "@/layouts/AdminLayout";
-import { ParticipantLayout } from "@/layouts/ParticipantLayout";
-import { RootLayout } from "@/layouts/RootLayout";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AdminDashboardPage } from "@/pages/admin/AdminDashboardPage";
-import { AdminLoginPage } from "@/pages/admin/AdminLoginPage";
-import { CreateSessionPage } from "@/pages/admin/CreateSessionPage";
-import { GamesPage } from "@/pages/admin/GamesPage";
-import { LiveSessionsPage } from "@/pages/admin/LiveSessionsPage";
-import { QuestionBankPage } from "@/pages/admin/QuestionBankPage";
-import { QuestionFormPage } from "@/pages/admin/QuestionFormPage";
-import { ResultsPage } from "@/pages/admin/ResultsPage";
-import { ScoreboardPage } from "@/pages/admin/ScoreboardPage";
-import { SettingsPage } from "@/pages/admin/SettingsPage";
-import { TeamsPage } from "@/pages/admin/TeamsPage";
+import { FinalLeaderboardPage } from "@/pages/FinalLeaderboardPage";
+import { LoginPage } from "@/pages/LoginPage";
 import {
-  ParticipantConfirmPage,
-  ParticipantGamePage,
-  ParticipantJoinPage,
-  ParticipantWaitingPage,
+  ParticipantCustomGamePage,
+  ParticipantLightningTalksPage,
+  ParticipantTeamPage,
+  ParticipantTechDetectivePage,
 } from "@/pages/participant";
-import { WelcomePage } from "@/pages/WelcomePage";
 
-/** Application route tree. */
+function PublicLoginRoute() {
+  const { currentUser, token } = useAuth();
+  if (token && currentUser) {
+    return <Navigate to={currentUser.role === "admin" ? "/admin" : "/team"} replace />;
+  }
+  return <LoginPage />;
+}
+
+function ProtectedRoute({
+  children,
+  requiredRole,
+}: {
+  children: React.ReactNode;
+  requiredRole?: "admin" | "participant";
+}) {
+  const { currentUser, token, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center font-mono text-xs">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!token || !currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (requiredRole && currentUser.role !== requiredRole) {
+    return <Navigate to={currentUser.role === "admin" ? "/admin" : "/team"} replace />;
+  }
+
+  return <>{children}</>;
+}
+
+/** Application route tree with role-based routing and automatic redirection on logout. */
 export default function App() {
   return (
     <BrowserRouter>
-      <QuestionsProvider>
-        <TeamsProvider>
-          <SessionsProvider>
-            <ParticipantProvider>
-              <Routes>
-                {/* Public / root pages */}
-                <Route element={<RootLayout />}>
-                  <Route index element={<WelcomePage />} />
-                  <Route path="admin/login" element={<AdminLoginPage />} />
-                </Route>
+      <AuthProvider>
+        <Routes>
+          {/* Public / Authentication */}
+          <Route path="/" element={<PublicLoginRoute />} />
+          <Route path="/login" element={<PublicLoginRoute />} />
 
-                {/* Admin section */}
-                <Route path="admin" element={<AdminLayout />}>
-                  <Route index element={<Navigate to="dashboard" replace />} />
-                  <Route path="dashboard" element={<AdminDashboardPage />} />
-                  <Route path="games" element={<GamesPage />} />
-                  <Route path="questions" element={<QuestionBankPage />} />
-                  <Route path="questions/new" element={<QuestionFormPage />} />
-                  <Route path="questions/:id/edit" element={<QuestionFormPage />} />
-                  <Route path="teams" element={<TeamsPage />} />
-                  <Route path="sessions" element={<LiveSessionsPage />} />
-                  <Route path="sessions/new" element={<CreateSessionPage />} />
-                  <Route path="scoreboard" element={<ScoreboardPage />} />
-                  <Route path="results" element={<ResultsPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
-                </Route>
+          {/* Participant Flow */}
+          <Route
+            path="/team"
+            element={
+              <ProtectedRoute requiredRole="participant">
+                <ParticipantTeamPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/games/tech-detective"
+            element={
+              <ProtectedRoute requiredRole="participant">
+                <ParticipantTechDetectivePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/games/lightning-talks"
+            element={
+              <ProtectedRoute requiredRole="participant">
+                <ParticipantLightningTalksPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/games/:gameCode"
+            element={
+              <ProtectedRoute requiredRole="participant">
+                <ParticipantCustomGamePage />
+              </ProtectedRoute>
+            }
+          />
 
-                {/* Participant section */}
-                <Route path="participant" element={<ParticipantLayout />}>
-                  <Route index element={<Navigate to="join" replace />} />
-                  <Route path="join" element={<ParticipantJoinPage />} />
-                  <Route path="confirm" element={<ParticipantConfirmPage />} />
-                  <Route path="waiting" element={<ParticipantWaitingPage />} />
-                  <Route path="game" element={<ParticipantGamePage />} />
-                </Route>
+          {/* Public / Participant / Admin Leaderboard */}
+          <Route path="/leaderboard" element={<FinalLeaderboardPage />} />
 
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </ParticipantProvider>
-          </SessionsProvider>
-        </TeamsProvider>
-      </QuestionsProvider>
+          {/* Admin Flow */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminDashboardPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Catch-all */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

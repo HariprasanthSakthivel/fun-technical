@@ -41,7 +41,32 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if user.role == "participant" and not user.is_logged_in:
+        user.is_logged_in = True
+        db.commit()
+
     return user
+
+
+def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Security(security_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """Dependency: retrieve User if token is present & valid, otherwise None without throwing 401."""
+    if not credentials:
+        return None
+    try:
+        claims = decode_access_token(credentials.credentials)
+        if not claims or not claims.get("sub"):
+            return None
+        user_id = claims.get("sub")
+        user = db.query(User).filter(User.id == int(user_id)).first()
+        if user and user.role == "participant" and not user.is_logged_in:
+            user.is_logged_in = True
+            db.commit()
+        return user
+    except Exception:
+        return None
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
