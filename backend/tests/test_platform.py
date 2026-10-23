@@ -147,13 +147,38 @@ def test_random_team_formation_odd():
     admin_token = get_token("admin", "admin123")
     headers = {"Authorization": f"Bearer {admin_token}"}
 
-    # 5 users -> (5-1)/2 = 2 teams: 1 team of 2, 1 team of 3
+    # 5 users -> 2 teams: 1 team of 2, 1 team of 3
     res = client.post("/api/teams/randomize", json={}, headers=headers)
     assert res.status_code == 200
     teams = res.json()
     assert len(teams) == 2
     lens = sorted([len(t["members"]) for t in teams])
     assert lens == [2, 3]
+
+
+def test_random_team_formation_11_participants():
+    admin_token = get_token("admin", "admin123")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Add 5 more users so there are 11 participants total
+    for k in range(7, 12):
+        client.post(
+            "/api/auth/register",
+            json={"username": f"user{k}", "display_name": f"Participant {k}", "password": "pass123"},
+        )
+
+    # 11 participants with team_size = 2 -> Exactly 5 teams (4 of 2, 1 of 3)
+    res = client.post("/api/teams/randomize", json={"team_size": 2, "include_all": True}, headers=headers)
+    assert res.status_code == 200
+    teams = res.json()
+    assert len(teams) == 5  # Exactly 5 teams! NOT 6 teams!
+    lens = sorted([len(t["members"]) for t in teams])
+    assert lens == [2, 2, 2, 2, 3]  # One team has 3 members, four teams have 2 members!
+
+    # Clean up temporary users 7-11
+    with TestingSessionLocal() as db:
+        db.query(User).filter(User.username.in_([f"user{k}" for k in range(7, 12)])).delete(synchronize_session=False)
+        db.commit()
 
 
 def test_random_team_formation_custom_size():
@@ -571,5 +596,158 @@ def test_custom_game_buzzer_race_and_evaluation():
     eval_data = eval_res.json()
     assert eval_data["is_correct"] is True
     assert eval_data["points_awarded"] == 10
+
+
+def test_lightning_talks_buzzer_and_scoring():
+    admin_token = get_token("admin", "admin123")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Ensure 6 users exist and are assigned to teams T01, T02, T03 (2 each)
+    client.post("/api/teams/randomize", json={"team_size": 2, "include_all": True}, headers=admin_headers)
+
+    # Get team list to identify team IDs
+    teams_res = client.get("/api/teams")
+    assert teams_res.status_code == 200
+    teams = teams_res.json()
+    assert len(teams) >= 3
+    t1 = teams[0]
+    t2 = teams[1]
+    t3 = teams[2]
+
+    # Pick speaker user from Team 1
+    speaker_user = t1["members"][0]
+    teammate_user = t1["members"][1]
+    # Pick audience users from Team 2 and Team 3
+    audience_u2 = t2["members"][0]
+    audience_u3 = t3["members"][0]
+
+    speaker_token = get_token(speaker_user["username"], "pass123")
+    teammate_token = get_token(teammate_user["username"], "pass123")
+    audience_u2_token = get_token(audience_u2["username"], "pass123")
+    audience_u3_token = get_token(audience_u3["username"], "pass123")
+
+    # Assign topic to speaker and unlock
+    assign_res = client.post(
+        "/api/lightning-talks/manual-assign",
+        json={
+            "user_id": speaker_user["id"],
+            "team_id": t1["id"],
+            "topic_name": "Kubernetes Architecture",
+            "prohibited_words": ["docker", "cluster"],
+        },
+        headers=admin_headers,
+    )
+    assert assign_res.status_code == 200
+    topic_id = assign_res.json()["id"]
+
+    unlock_res = client.post(f"/api/lightning-talks/unlock/{topic_id}", headers=admin_headers)
+    assert unlock_res.status_code == 200
+
+    # 1. Before admin opens buzzer, audience buzzing fails
+    buzz_early = client.post(
+        "/api/lightning-talks/buzz",
+        headers={"Authorization": f"Bearer {audience_u2_token}"},
+    )
+    assert buzz_early.status_code == 400
+    assert "Buzzer is currently locked or topic guessing has not opened yet" in buzz_early.json()["detail"]
+
+    # 2. Admin opens buzzer for topic
+    open_res = client.post(
+        f"/api/lightning-talks/open-buzzer/{topic_id}",
+        headers=admin_headers,
+    )
+    assert open_res.status_code == 200
+    assert open_res.json()["is_buzzer_open"] is True
+
+    # 3. Speaker's own team member tries to buzz -> forbidden
+    buzz_own_team = client.post(
+        "/api/lightning-talks/buzz",
+        headers={"Authorization": f"Bearer {teammate_token}"},
+    )
+    assert buzz_own_team.status_code == 400
+    assert "cannot guess your own topic" in buzz_own_team.json()["detail"]
+
+    # 4. Audience Team 2 buzzes in -> Position 1
+    buzz1 = client.post(
+        "/api/lightning-talks/buzz",
+        headers={"Authorization": f"Bearer {audience_u2_token}"},
+    )
+    assert buzz1.status_code == 200
+    assert buzz1.json()["position"] == 1
+    assert buzz1.json()["team_id"] == t2["id"]
+
+    # 5. Audience Team 2 tries to buzz again -> idempotent response with existing position
+    buzz_dup = client.post(
+        "/api/lightning-talks/buzz",
+        headers={"Authorization": f"Bearer {audience_u2_token}"},
+    )
+    assert buzz_dup.status_code == 200
+    assert buzz_dup.json()["position"] == 1
+    assert "already pressed" in buzz_dup.json()["message"]
+
+    # 6. Audience Team 3 buzzes in -> Position 2
+    buzz2 = client.post(
+        "/api/lightning-talks/buzz",
+        headers={"Authorization": f"Bearer {audience_u3_token}"},
+    )
+    assert buzz2.status_code == 200
+    assert buzz2.json()["position"] == 2
+    assert buzz2.json()["team_id"] == t3["id"]
+
+    # 7. Check buzzer queue
+    queue_res = client.get(
+        f"/api/lightning-talks/buzzer-queue/{topic_id}",
+        headers=admin_headers,
+    )
+    assert queue_res.status_code == 200
+    queue = queue_res.json()
+    assert len(queue["buzzers"]) == 2
+    assert queue["current_answering_position"] == 1
+
+    # Record initial scores
+    t2_initial_score = client.get("/api/teams").json()
+    t2_score_before = next(t["lightning_talks_score"] for t in t2_initial_score if t["id"] == t2["id"])
+    t3_score_before = next(t["lightning_talks_score"] for t in t2_initial_score if t["id"] == t3["id"])
+
+    # 8. Admin evaluates Team 2 as Incorrect -> -5 points penalty
+    eval1 = client.post(
+        "/api/lightning-talks/evaluate-guess",
+        json={
+            "topic_id": topic_id,
+            "team_id": t2["id"],
+            "buzzer_position": 1,
+            "is_correct": False,
+        },
+        headers=admin_headers,
+    )
+    assert eval1.status_code == 200
+    assert eval1.json()["is_correct"] is False
+    assert eval1.json()["points_awarded"] == -5
+    assert eval1.json()["next_position"] == 2
+
+    # Verify Team 2 lost 5 points
+    teams_after_eval1 = client.get("/api/teams").json()
+    t2_score_after = next(t["lightning_talks_score"] for t in teams_after_eval1 if t["id"] == t2["id"])
+    assert t2_score_after == t2_score_before - 5
+
+    # 9. Admin evaluates Team 3 as Correct -> +10 points award
+    eval2 = client.post(
+        "/api/lightning-talks/evaluate-guess",
+        json={
+            "topic_id": topic_id,
+            "team_id": t3["id"],
+            "buzzer_position": 2,
+            "is_correct": True,
+        },
+        headers=admin_headers,
+    )
+    assert eval2.status_code == 200
+    assert eval2.json()["is_correct"] is True
+    assert eval2.json()["points_awarded"] == 10
+
+    # Verify Team 3 gained 10 points
+    teams_after_eval2 = client.get("/api/teams").json()
+    t3_score_after = next(t["lightning_talks_score"] for t in teams_after_eval2 if t["id"] == t3["id"])
+    assert t3_score_after == t3_score_before + 10
 
 

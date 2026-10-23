@@ -153,9 +153,36 @@ class LightningTalkTopic(Base):
     is_unlocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     unlocked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     duration_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    is_buzzer_open: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    current_answering_team_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    current_answering_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     assigned_user: Mapped["User | None"] = relationship("User")
     assigned_team: Mapped["Team | None"] = relationship("Team")
+
+
+class LightningTalkBuzzer(Base):
+    """Game 2: Buzzer presses recorded in chronological order for guessing the speaker's topic.
+    Maximum 3 teams per topic.
+    """
+
+    __tablename__ = "lightning_talk_buzzers"
+    __table_args__ = (
+        UniqueConstraint("topic_id", "team_id", name="uq_lt_buzzer_topic_team"),
+        UniqueConstraint("topic_id", "position", name="uq_lt_buzzer_topic_position"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("lightning_talk_topics.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    team_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    team_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)  # 1, 2, or 3
+    pressed_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
 
 
 class LightningTalkScore(Base):

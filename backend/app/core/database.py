@@ -96,6 +96,19 @@ def ensure_schema_migrations(target_engine: Engine = engine) -> None:
                 # Backfill media_url from image_url if image_url exists
                 conn.exec_driver_sql("UPDATE game_questions SET media_url = image_url, media_type = 'image' WHERE media_url IS NULL AND image_url IS NOT NULL")
                 conn.commit()
+
+            lt_res = conn.exec_driver_sql("PRAGMA table_info(lightning_talk_topics)")
+            lt_cols = [row[1] for row in lt_res.fetchall()]
+            if lt_cols:
+                if "is_buzzer_open" not in lt_cols:
+                    conn.exec_driver_sql("ALTER TABLE lightning_talk_topics ADD COLUMN is_buzzer_open BOOLEAN DEFAULT 0")
+                if "current_answering_team_id" not in lt_cols:
+                    conn.exec_driver_sql("ALTER TABLE lightning_talk_topics ADD COLUMN current_answering_team_id VARCHAR(32) DEFAULT NULL")
+                if "current_answering_position" not in lt_cols:
+                    conn.exec_driver_sql("ALTER TABLE lightning_talk_topics ADD COLUMN current_answering_position INTEGER DEFAULT NULL")
+                if "is_completed" not in lt_cols:
+                    conn.exec_driver_sql("ALTER TABLE lightning_talk_topics ADD COLUMN is_completed BOOLEAN DEFAULT 0")
+                conn.commit()
         except Exception:
             # Table might not exist yet before create_all
             pass

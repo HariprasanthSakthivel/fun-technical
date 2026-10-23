@@ -188,6 +188,10 @@ class LightningTopicAdminResponse(BaseModel):
     is_unlocked: bool
     unlocked_at: datetime | None = None
     duration_seconds: int = 60
+    is_buzzer_open: bool = False
+    current_answering_team_id: str | None = None
+    current_answering_position: int | None = None
+    is_completed: bool = False
 
 
 class LightningTopicParticipantResponse(BaseModel):
@@ -201,6 +205,18 @@ class LightningTopicParticipantResponse(BaseModel):
     is_my_turn: bool = True
     active_speaker_name: str | None = None
     active_speaker_team: str | None = None
+    assigned_team_id: str | None = None
+    is_buzzer_open: bool = False
+    current_answering_team_id: str | None = None
+    current_answering_position: int | None = None
+    is_completed: bool = False
+
+
+class EvaluateLightningGuessRequest(BaseModel):
+    topic_id: str
+    team_id: str
+    buzzer_position: int = Field(..., ge=1, le=3)
+    is_correct: bool
 
 
 class EvaluateLightningSpeechRequest(BaseModel):

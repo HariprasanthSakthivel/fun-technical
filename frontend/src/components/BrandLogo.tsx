@@ -41,7 +41,7 @@ export function BrandLogo({ className = "", size = "md" }: { className?: string;
       <div className="flex flex-col">
         <div className="flex items-baseline gap-1.5 leading-none">
           <span className={`font-black tracking-tight text-white ${textSize}`}>
-            aXtr<span className="text-zinc-400 font-semibold">Labs</span>
+            aXtrLabs
           </span>
         </div>
         <span className={`uppercase font-bold tracking-widest text-zinc-400 ${subSize} mt-0.5`}>

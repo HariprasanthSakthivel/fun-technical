@@ -128,15 +128,18 @@ def randomize_teams(
     db.commit()
 
     # 4. Dynamically determine team count and sizes
-    desired_teams = max(2, round(n / target_size))
-    num_teams = min(n, desired_teams)
-    if n >= 2:
-        num_teams = max(2, num_teams)
+    # We want teams of `target_size` (e.g. 2).
+    # If there is an odd person (e.g. 11 participants with target_size 2),
+    # they must NOT form a lonely 1-person team.
+    # Instead, we form exactly n // target_size teams (5 teams) and distribute the extra person
+    # into one of the teams to make a team of 3.
+    num_teams = max(2, n // target_size)
+    num_teams = min(n, num_teams)
 
     base_size = n // num_teams
     remainder = n % num_teams
 
-    # Distribute: the first `remainder` teams get base_size + 1, and the rest get base_size
+    # Distribute: the first `remainder` teams get base_size + 1 (e.g. 3), and the rest get base_size (e.g. 2)
     team_sizes = [base_size + (1 if i < remainder else 0) for i in range(num_teams)]
 
     teams_created: list[Team] = []

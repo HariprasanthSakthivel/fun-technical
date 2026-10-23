@@ -11,6 +11,7 @@ import type {
   LightningTopicAdmin,
   LightningTopicParticipant,
   ManualTopicAssignPayload,
+  EvaluateLightningGuessPayload,
   QuestionWiseScoreResponse,
   RegisterPayload,
   Team,
@@ -370,6 +371,47 @@ export async function editLightningScore(teamId: string, score: number): Promise
   return request<LightningLeaderboardItem>(`/api/lightning-talks/scores/${teamId}`, {
     method: "PUT",
     body: JSON.stringify({ score }),
+  });
+}
+
+export async function openLightningBuzzer(topicId: string): Promise<{ message: string; topic_id: string; is_buzzer_open: boolean }> {
+  return request(`/api/lightning-talks/open-buzzer/${topicId}`, {
+    method: "POST",
+  });
+}
+
+export async function pressLightningBuzzer(): Promise<{ message: string; position: number; team_id: string }> {
+  return request("/api/lightning-talks/buzz", {
+    method: "POST",
+  });
+}
+
+export async function fetchLightningBuzzerQueue(topicId: string): Promise<BuzzerQueue> {
+  return request<BuzzerQueue>(`/api/lightning-talks/buzzer-queue/${topicId}`);
+}
+
+export async function evaluateLightningGuess(payload: EvaluateLightningGuessPayload): Promise<{
+  success: boolean;
+  team_id: string;
+  team_name: string;
+  buzzer_position: number;
+  is_correct: boolean;
+  points_awarded: number;
+  new_score: number;
+  next_team_id?: string | null;
+  next_position?: number | null;
+  is_completed: boolean;
+  message: string;
+}> {
+  return request("/api/lightning-talks/evaluate-guess", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function resetLightningBuzzer(topicId: string): Promise<{ message: string }> {
+  return request(`/api/lightning-talks/reset-buzzer/${topicId}`, {
+    method: "POST",
   });
 }
 

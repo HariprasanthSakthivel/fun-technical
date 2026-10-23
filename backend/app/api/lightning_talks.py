@@ -22,14 +22,18 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, require_admin
 from app.models.models import (
     GameState,
+    LightningTalkBuzzer,
     LightningTalkScore,
     LightningTalkTopic,
     Team,
     User,
 )
 from app.schemas.schemas import (
+    BuzzerEntry,
+    BuzzerQueueResponse,
     CreateTopicRequest,
     EditLightningScoreRequest,
+    EvaluateLightningGuessRequest,
     EvaluateLightningSpeechRequest,
     LightningLeaderboardEntry,
     LightningTopicAdminResponse,
@@ -72,6 +76,10 @@ def get_topics_admin(_: User = Depends(require_admin), db: Session = Depends(get
                 is_unlocked=t.is_unlocked,
                 unlocked_at=t.unlocked_at,
                 duration_seconds=t.duration_seconds,
+                is_buzzer_open=bool(t.is_buzzer_open),
+                current_answering_team_id=t.current_answering_team_id,
+                current_answering_position=t.current_answering_position,
+                is_completed=bool(t.is_completed),
             )
         )
     return result
@@ -106,6 +114,11 @@ def get_my_active_topic(
             is_my_turn=True,
             active_speaker_name=current_user.display_name,
             active_speaker_team=current_user.team.team_name if current_user.team else None,
+            assigned_team_id=my_unlocked_topic.assigned_team_id,
+            is_buzzer_open=bool(my_unlocked_topic.is_buzzer_open),
+            current_answering_team_id=my_unlocked_topic.current_answering_team_id,
+            current_answering_position=my_unlocked_topic.current_answering_position,
+            is_completed=bool(my_unlocked_topic.is_completed),
         )
 
     # 2. Check if another speaker's topic is currently unlocked on stage
@@ -127,6 +140,11 @@ def get_my_active_topic(
             is_my_turn=False,
             active_speaker_name=speaker.display_name if speaker else "Active Speaker",
             active_speaker_team=team.team_name if team else None,
+            assigned_team_id=active_unlocked_topic.assigned_team_id,
+            is_buzzer_open=bool(active_unlocked_topic.is_buzzer_open),
+            current_answering_team_id=active_unlocked_topic.current_answering_team_id,
+            current_answering_position=active_unlocked_topic.current_answering_position,
+            is_completed=bool(active_unlocked_topic.is_completed),
         )
 
     # 3. Check if current user has a topic assigned directly to them (even if not yet unlocked)
@@ -146,6 +164,11 @@ def get_my_active_topic(
             is_my_turn=True,
             active_speaker_name=current_user.display_name,
             active_speaker_team=current_user.team.team_name if current_user.team else None,
+            assigned_team_id=my_assigned_topic.assigned_team_id,
+            is_buzzer_open=bool(my_assigned_topic.is_buzzer_open),
+            current_answering_team_id=my_assigned_topic.current_answering_team_id,
+            current_answering_position=my_assigned_topic.current_answering_position,
+            is_completed=bool(my_assigned_topic.is_completed),
         )
 
     return None
@@ -429,3 +452,283 @@ def edit_lightning_score(
         team_name=team.team_name,
         score=team.lightning_talks_score,
     )
+
+
+# ── Game 2 Buzzer Guessing System ─────────────────────────────────────────────
+
+@router.post("/open-buzzer/{topic_id}")
+def open_lightning_buzzer(
+    topic_id: str,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin opens the buzzer after speaker finishes their talk so audience teams can guess the topic."""
+    topic = db.query(LightningTalkTopic).filter(LightningTalkTopic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+
+    # Clear existing buzzers for this topic
+    db.query(LightningTalkBuzzer).filter(LightningTalkBuzzer.topic_id == topic_id).delete()
+
+    topic.is_buzzer_open = True
+    topic.is_completed = False
+    topic.current_answering_team_id = None
+    topic.current_answering_position = None
+
+    state = db.query(GameState).filter(GameState.id == 1).first()
+    if state:
+        state.is_buzzer_open = True
+        state.updated_at = utc_now()
+
+    db.commit()
+    db.refresh(topic)
+
+    return {
+        "message": f"Buzzer opened for topic guessing! Teams can buzz in now.",
+        "topic_id": topic.id,
+        "is_buzzer_open": True,
+    }
+
+
+@router.post("/buzz")
+def press_lightning_buzzer(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """Participant buzzer press to guess the active speaker's topic.
+    Records up to 3 teams in chronological order. Once 3 teams buzz, auto-locks.
+    """
+    if not current_user.team_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must be in a team to press the buzzer",
+        )
+
+    team = db.query(Team).filter(Team.id == current_user.team_id).first()
+    if not team:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team not found")
+
+    # Find the active unlocked topic
+    topic = (
+        db.query(LightningTalkTopic)
+        .filter(LightningTalkTopic.is_unlocked.is_(True))
+        .first()
+    )
+    if not topic or not topic.is_buzzer_open:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Buzzer is currently locked or topic guessing has not opened yet.",
+        )
+
+    # Prevent the speaker's own team from buzzing their own topic
+    if topic.assigned_team_id and team.id == topic.assigned_team_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your team member was the speaker! Your team cannot guess your own topic.",
+        )
+
+    # Check if team already buzzed for this topic
+    existing = (
+        db.query(LightningTalkBuzzer)
+        .filter(LightningTalkBuzzer.topic_id == topic.id, LightningTalkBuzzer.team_id == team.id)
+        .first()
+    )
+    if existing:
+        return {
+            "message": f"Team {team.team_name} already pressed the buzzer",
+            "position": existing.position,
+            "team_id": team.id,
+        }
+
+    # Count how many teams have buzzed
+    current_count = (
+        db.query(LightningTalkBuzzer)
+        .filter(LightningTalkBuzzer.topic_id == topic.id)
+        .count()
+    )
+    if current_count >= 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Buzzer is locked! The first 3 teams have already buzzed.",
+        )
+
+    new_position = current_count + 1
+    buzzer_entry = LightningTalkBuzzer(
+        topic_id=topic.id,
+        team_id=team.id,
+        team_name=team.team_name,
+        position=new_position,
+        pressed_at=utc_now(),
+    )
+    db.add(buzzer_entry)
+
+    # If first team, assign answering opportunity to this team
+    if new_position == 1:
+        topic.current_answering_team_id = team.id
+        topic.current_answering_position = 1
+
+    # Auto lock after 3 teams
+    if new_position >= 3:
+        topic.is_buzzer_open = False
+
+    db.commit()
+
+    return {
+        "message": f"Buzzer confirmed! Position #{new_position}",
+        "position": new_position,
+        "team_id": team.id,
+    }
+
+
+@router.get("/buzzer-queue/{topic_id}", response_model=BuzzerQueueResponse)
+def get_lightning_buzzer_queue(topic_id: str, db: Session = Depends(get_db)):
+    """Fetch the chronological buzzer queue for a lightning talk topic."""
+    topic = db.query(LightningTalkTopic).filter(LightningTalkTopic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+
+    buzzers = (
+        db.query(LightningTalkBuzzer)
+        .filter(LightningTalkBuzzer.topic_id == topic_id)
+        .order_by(LightningTalkBuzzer.position.asc())
+        .all()
+    )
+    entries = [
+        BuzzerEntry(
+            id=b.id,
+            team_id=b.team_id,
+            team_name=b.team_name,
+            position=b.position,
+            pressed_at=b.pressed_at,
+        )
+        for b in buzzers
+    ]
+
+    return BuzzerQueueResponse(
+        question_id=topic.id,
+        is_buzzer_open=bool(topic.is_buzzer_open),
+        buzzers=entries,
+        current_answering_team_id=topic.current_answering_team_id,
+        current_answering_position=topic.current_answering_position,
+    )
+
+
+@router.post("/evaluate-guess")
+def evaluate_lightning_guess(
+    payload: EvaluateLightningGuessRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin evaluates a team's topic guess attempt (+10 for Correct, -5 for Incorrect).
+    
+    If incorrect, passes opportunity to the next team in buzzer position.
+    """
+    topic = db.query(LightningTalkTopic).filter(LightningTalkTopic.id == payload.topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+
+    team = db.query(Team).filter(Team.id == payload.team_id).first()
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    if payload.is_correct:
+        points_awarded = 10
+        team.lightning_talks_score += points_awarded
+        team.total_score += points_awarded
+
+        # Round completed
+        topic.is_completed = True
+        topic.is_buzzer_open = False
+        topic.current_answering_team_id = None
+        topic.current_answering_position = None
+
+        db.commit()
+        recalculate_final_ranks(db)
+
+        return {
+            "success": True,
+            "team_id": team.id,
+            "team_name": team.team_name,
+            "buzzer_position": payload.buzzer_position,
+            "is_correct": True,
+            "points_awarded": points_awarded,
+            "new_score": team.lightning_talks_score,
+            "is_completed": True,
+            "message": f"Correct! +{points_awarded} awarded to {team.team_name}!",
+        }
+    else:
+        # Incorrect deduction = -5 pts
+        deduction = -5
+        team.lightning_talks_score += deduction  # deducting 5
+        team.total_score += deduction
+
+        # Pass to next team in buzzer queue
+        next_pos = payload.buzzer_position + 1
+        next_buzzer = (
+            db.query(LightningTalkBuzzer)
+            .filter(
+                LightningTalkBuzzer.topic_id == topic.id,
+                LightningTalkBuzzer.position == next_pos,
+            )
+            .first()
+        )
+
+        if next_buzzer:
+            topic.current_answering_team_id = next_buzzer.team_id
+            topic.current_answering_position = next_buzzer.position
+            db.commit()
+            recalculate_final_ranks(db)
+            return {
+                "success": True,
+                "team_id": team.id,
+                "team_name": team.team_name,
+                "buzzer_position": payload.buzzer_position,
+                "is_correct": False,
+                "points_awarded": deduction,
+                "new_score": team.lightning_talks_score,
+                "next_team_id": next_buzzer.team_id,
+                "next_position": next_buzzer.position,
+                "is_completed": False,
+                "message": f"Incorrect (-5 pts)! Passing turn to Position #{next_pos} ({next_buzzer.team_name}).",
+            }
+        else:
+            # No more teams in queue
+            topic.current_answering_team_id = None
+            topic.current_answering_position = None
+            topic.is_completed = True
+            topic.is_buzzer_open = False
+            db.commit()
+            recalculate_final_ranks(db)
+            return {
+                "success": True,
+                "team_id": team.id,
+                "team_name": team.team_name,
+                "buzzer_position": payload.buzzer_position,
+                "is_correct": False,
+                "points_awarded": deduction,
+                "new_score": team.lightning_talks_score,
+                "next_team_id": None,
+                "next_position": None,
+                "is_completed": True,
+                "message": f"Incorrect (-5 pts)! No remaining teams in queue. Guessing round ends.",
+            }
+
+
+@router.post("/reset-buzzer/{topic_id}")
+def reset_lightning_buzzer(
+    topic_id: str,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin resets the buzzer queue for this topic and re-opens the buzzer."""
+    topic = db.query(LightningTalkTopic).filter(LightningTalkTopic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+
+    db.query(LightningTalkBuzzer).filter(LightningTalkBuzzer.topic_id == topic_id).delete()
+    topic.is_buzzer_open = True
+    topic.is_completed = False
+    topic.current_answering_team_id = None
+    topic.current_answering_position = None
+
+    db.commit()
+    return {"message": f"Buzzer reset and reopened for topic '{topic.topic_name}'"}

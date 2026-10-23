@@ -131,6 +131,10 @@ export interface LightningTopicAdmin {
   is_unlocked: boolean;
   unlocked_at?: string | null;
   duration_seconds: number;
+  is_buzzer_open?: boolean;
+  current_answering_team_id?: string | null;
+  current_answering_position?: number | null;
+  is_completed?: boolean;
 }
 
 export interface ManualTopicAssignPayload {
@@ -159,6 +163,18 @@ export interface LightningTopicParticipant {
   is_my_turn?: boolean;
   active_speaker_name?: string | null;
   active_speaker_team?: string | null;
+  assigned_team_id?: string | null;
+  is_buzzer_open?: boolean;
+  current_answering_team_id?: string | null;
+  current_answering_position?: number | null;
+  is_completed?: boolean;
+}
+
+export interface EvaluateLightningGuessPayload {
+  topic_id: string;
+  team_id: string;
+  buzzer_position: number;
+  is_correct: boolean;
 }
 
 export interface LightningLeaderboardItem {

@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
+  Bell,
+  Clock,
   LogOut,
   Mic,
   MicOff,
@@ -16,11 +18,14 @@ import { useAuth } from "@/context/AuthContext";
 import { GameTimerWidget } from "@/components/GameTimerWidget";
 import {
   fetchGameTimer,
+  fetchLightningBuzzerQueue,
   fetchLightningLeaderboard,
   fetchMyActiveLightningTopic,
   fetchMyTeam,
+  pressLightningBuzzer,
 } from "@/services/api";
 import type {
+  BuzzerQueue,
   GameTimer,
   LightningLeaderboardItem,
   LightningTopicParticipant,
@@ -35,6 +40,9 @@ export function ParticipantLightningTalksPage() {
   const [activeTopic, setActiveTopic] = useState<LightningTopicParticipant | null>(null);
   const [leaderboard, setLeaderboard] = useState<LightningLeaderboardItem[]>([]);
   const [gameTimer, setGameTimer] = useState<GameTimer | null>(null);
+  const [buzzerQueue, setBuzzerQueue] = useState<BuzzerQueue | null>(null);
+  const [isBuzzing, setIsBuzzing] = useState(false);
+  const [buzzerMessage, setBuzzerMessage] = useState<string | null>(null);
 
   // Sync state every 2 seconds
   const syncState = async () => {
@@ -51,6 +59,13 @@ export function ParticipantLightningTalksPage() {
       setActiveTopic(top);
       setLeaderboard(lb);
       setGameTimer(tm);
+
+      if (top?.id) {
+        const bq = await fetchLightningBuzzerQueue(top.id).catch(() => null);
+        setBuzzerQueue(bq);
+      } else {
+        setBuzzerQueue(null);
+      }
     } catch {
       // Quiet fallback
     }
@@ -62,6 +77,23 @@ export function ParticipantLightningTalksPage() {
     return () => clearInterval(interval);
   }, [myTeam?.id]);
 
+  const handleBuzz = async () => {
+    try {
+      setIsBuzzing(true);
+      setBuzzerMessage(null);
+      const res = await pressLightningBuzzer();
+      setBuzzerMessage(`Buzzer confirmed! Position #${res.position}`);
+      if (activeTopic?.id) {
+        const bq = await fetchLightningBuzzerQueue(activeTopic.id).catch(() => null);
+        setBuzzerQueue(bq);
+      }
+    } catch (err: unknown) {
+      setBuzzerMessage(err instanceof Error ? err.message : "Buzzer request failed");
+    } finally {
+      setIsBuzzing(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -69,6 +101,13 @@ export function ParticipantLightningTalksPage() {
       navigate("/login", { replace: true });
     }
   };
+
+  const myBuzzerEntry = buzzerQueue?.buzzers?.find((b) => b.team_id === myTeam?.id);
+  const isMyTeamAnswering = buzzerQueue?.current_answering_team_id === myTeam?.id;
+  const isBuzzerLocked = !activeTopic?.is_buzzer_open || (buzzerQueue?.buzzers?.length || 0) >= 3;
+  const isSpeakerTeam = Boolean(
+    activeTopic?.assigned_team_id && myTeam?.id === activeTopic.assigned_team_id
+  );
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col font-sans selection:bg-white/20">
@@ -179,6 +218,94 @@ export function ParticipantLightningTalksPage() {
                 </div>
               </Card>
 
+              {/* Audience Topic Guessing Buzzer Card */}
+              <Card className="p-6 bg-zinc-950 border-zinc-800 shadow-2xl text-center space-y-5">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-zinc-800 pb-3">
+                  <div className="text-left">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Bell className="w-5 h-5 text-amber-400" />
+                      Topic Guessing Buzzer
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Guess the topic after the speaker finishes!
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-800">
+                      Correct: +10 pts
+                    </span>
+                    <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-rose-950/80 text-rose-400 border border-rose-800">
+                      Incorrect: -5 pts
+                    </span>
+                  </div>
+                </div>
+
+                {buzzerMessage && (
+                  <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs max-w-md mx-auto">
+                    {buzzerMessage}
+                  </div>
+                )}
+
+                {isSpeakerTeam ? (
+                  <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 text-zinc-400 text-xs">
+                    Your team member is the speaker. Your team cannot buzz to guess this topic.
+                  </div>
+                ) : (
+                  <>
+                    {/* Big Interactive Buzzer Button */}
+                    <div className="py-2">
+                      <button
+                        type="button"
+                        onClick={handleBuzz}
+                        disabled={isBuzzing || isBuzzerLocked || !!myBuzzerEntry}
+                        className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full font-black text-lg tracking-wider uppercase transition-all transform active:scale-95 shadow-2xl flex flex-col items-center justify-center gap-2 mx-auto ${
+                          myBuzzerEntry
+                            ? "bg-emerald-600 text-white shadow-emerald-600/30 cursor-default"
+                            : isBuzzerLocked
+                            ? "bg-zinc-900 text-zinc-600 border border-zinc-800 cursor-not-allowed opacity-60"
+                            : "bg-white text-black hover:bg-zinc-200 shadow-white/10 hover:shadow-white/20 animate-pulse"
+                        }`}
+                      >
+                        <Bell className="w-8 h-8" />
+                        <span>
+                          {myBuzzerEntry
+                            ? `Pos #${myBuzzerEntry.position}`
+                            : isBuzzerLocked
+                            ? (buzzerQueue?.buzzers?.length || 0) >= 3 ? "Locked (3/3)" : "Locked"
+                            : "BUZZ NOW"}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Status Pills */}
+                    <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
+                      {myBuzzerEntry ? (
+                        <span className="px-3 py-1 font-bold rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800">
+                          Your Team is Position #{myBuzzerEntry.position} in Queue
+                        </span>
+                      ) : isBuzzerLocked ? (
+                        <span className="px-3 py-1 rounded-full bg-zinc-900 text-zinc-500 border border-zinc-800">
+                          {activeTopic.is_buzzer_open
+                            ? "Buzzer Full (Top 3 teams reached)"
+                            : "Buzzer Closed (Awaiting speaker to finish)"}
+                        </span>
+                      ) : (
+                        <span className="px-3 py-1 font-bold rounded-full bg-white text-black animate-pulse">
+                          Buzzer Open! Race to guess the topic!
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Answering Turn Notification */}
+                    {isMyTeamAnswering && (
+                      <div className="p-4 rounded-xl bg-amber-950/60 border border-amber-500/80 text-amber-300 text-xs font-bold animate-bounce max-w-md mx-auto">
+                        IT IS YOUR TEAM'S TURN TO GUESS! State your topic guess clearly to the conductor.
+                      </div>
+                    )}
+                  </>
+                )}
+              </Card>
+
               {/* Evaluation Criteria Explanation for audience */}
               <Card className="p-6 bg-zinc-950 border-zinc-800 space-y-3">
                 <h4 className="text-sm font-bold text-white flex items-center gap-2">
@@ -253,6 +380,18 @@ export function ParticipantLightningTalksPage() {
                     </div>
                   </div>
                 )}
+
+                {activeTopic.is_buzzer_open && (
+                  <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-700/60 space-y-1">
+                    <p className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Bell className="w-4 h-4" />
+                      Audience Topic Guessing Active
+                    </p>
+                    <p className="text-xs text-zinc-300">
+                      The conductor opened the buzzer for audience teams to guess your topic. Watch the live queue on the right!
+                    </p>
+                  </div>
+                )}
               </Card>
 
               {/* Evaluation Criteria Explanation */}
@@ -286,8 +425,67 @@ export function ParticipantLightningTalksPage() {
           )}
         </div>
 
-        {/* Right Col: Lightning Talks Scoreboard */}
+        {/* Right Col: Buzzer Queue & Scoreboard */}
         <div className="space-y-6">
+          {/* Topic Guessing Buzzer Queue */}
+          <Card className="p-5 bg-zinc-950 border-zinc-800 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-400" />
+                Topic Guessing Queue
+              </h3>
+              <Badge variant="muted" className="text-[10px]">
+                {buzzerQueue?.buzzers?.length || 0}/3 Teams
+              </Badge>
+            </div>
+
+            {!buzzerQueue || buzzerQueue.buzzers.length === 0 ? (
+              <p className="text-xs text-zinc-500 text-center py-6">
+                No teams have buzzed yet.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {buzzerQueue.buzzers.map((b) => {
+                  const isCurrent = b.position === buzzerQueue.current_answering_position;
+                  return (
+                    <div
+                      key={b.id}
+                      className={`p-3 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                        isCurrent
+                          ? "bg-zinc-900 border-white shadow-md shadow-white/5"
+                          : "bg-zinc-900/40 border-zinc-800"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center font-mono font-bold text-white text-xs">
+                          #{b.position}
+                        </span>
+                        <div>
+                          <p className="font-bold text-white">
+                            {b.team_name} {b.team_id === myTeam?.id && "(You)"}
+                          </p>
+                          <p className="text-[10px] text-zinc-400">
+                            {new Date(b.pressed_at).toLocaleTimeString([], {
+                              minute: "2-digit",
+                              second: "2-digit",
+                              fractionalSecondDigits: 2,
+                            })}
+                          </p>
+                        </div>
+                      </div>
+
+                      {isCurrent && (
+                        <span className="text-[10px] uppercase font-bold text-black bg-white px-2 py-0.5 rounded-full animate-pulse">
+                          Answering
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
           <Card className="p-5 bg-zinc-950 border-zinc-800 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <h3 className="text-sm font-extrabold text-white flex items-center gap-2">

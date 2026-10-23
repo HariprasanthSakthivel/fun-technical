@@ -61,6 +61,7 @@ import {
   editLightningScore,
   editTechDetectiveScore,
   evaluateCustomGameAnswer,
+  evaluateLightningGuess,
   evaluateLightningSpeech,
   evaluateTechDetectiveAnswer,
   fetchActiveGameQuestion,
@@ -71,6 +72,7 @@ import {
   fetchGameScores,
   fetchGames,
   fetchGameTimer,
+  fetchLightningBuzzerQueue,
   fetchLightningLeaderboard,
   fetchLightningTopicsAdmin,
   fetchLoggedInUsers,
@@ -79,9 +81,11 @@ import {
   fetchTechDetectiveQuestionsAdmin,
   fetchTechDetectiveScoreBreakdown,
   manualAssignLightningTopic,
+  openLightningBuzzer,
   randomizeTeams,
   resetCustomGameBuzzer,
   resetDatabase,
+  resetLightningBuzzer,
   transitionToGame2,
   unlockGameQuestion,
   unlockLightningTopic,
@@ -192,6 +196,8 @@ export function AdminDashboardPage() {
   const [isSubmittingSpeech, setIsSubmittingSpeech] = useState(false);
   const [editLtScoreModal, setEditLtScoreModal] = useState<LightningLeaderboardItem | null>(null);
   const [editLtScoreValue, setEditLtScoreValue] = useState<number>(0);
+  const [ltBuzzerQueue, setLtBuzzerQueue] = useState<BuzzerQueue | null>(null);
+  const [isEvaluatingLtGuess, setIsEvaluatingLtGuess] = useState(false);
 
   // State: Topic Creator for Game 2
   const [createTopicModalOpen, setCreateTopicModalOpen] = useState(false);
@@ -263,6 +269,14 @@ export function AdminDashboardPage() {
         ]);
         setLtTopics(tops);
         setLtLeaderboard(lb);
+
+        const unlocked = tops.find((t) => t.is_unlocked);
+        if (unlocked) {
+          const bq = await fetchLightningBuzzerQueue(unlocked.id).catch(() => null);
+          setLtBuzzerQueue(bq);
+        } else {
+          setLtBuzzerQueue(null);
+        }
       } else if (activeTab === "final") {
         const flb = await fetchFinalLeaderboard();
         setFinalLeaderboard(flb);
@@ -1029,6 +1043,52 @@ export function AdminDashboardPage() {
       showNotice(`Score updated to ${updated.score} pts`);
     } catch (err: unknown) {
       showNotice(err instanceof Error ? err.message : "Failed to edit score");
+    }
+  };
+
+  // Open Game 2 Buzzer for Audience Topic Guessing
+  const handleOpenLightningBuzzer = async (topicId: string) => {
+    try {
+      const res = await openLightningBuzzer(topicId);
+      showNotice(res.message);
+      syncDashboardData();
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : "Failed to open buzzer");
+    }
+  };
+
+  // Evaluate Game 2 Guess attempt (+10 for Correct, -5 for Incorrect)
+  const handleEvaluateLightningGuess = async (
+    topicId: string,
+    teamId: string,
+    position: number,
+    isCorrect: boolean
+  ) => {
+    try {
+      setIsEvaluatingLtGuess(true);
+      const res = await evaluateLightningGuess({
+        topic_id: topicId,
+        team_id: teamId,
+        buzzer_position: position,
+        is_correct: isCorrect,
+      });
+      showNotice(res.message);
+      syncDashboardData();
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : "Evaluation failed");
+    } finally {
+      setIsEvaluatingLtGuess(false);
+    }
+  };
+
+  // Reset Game 2 Buzzer Queue
+  const handleResetLightningBuzzer = async (topicId: string) => {
+    try {
+      const res = await resetLightningBuzzer(topicId);
+      showNotice(res.message);
+      syncDashboardData();
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : "Failed to reset buzzer");
     }
   };
 
@@ -2048,6 +2108,200 @@ export function AdminDashboardPage() {
                 </Button>
               </div>
             </div>
+
+            {/* Active Speaker & Topic Guessing Buzzer Console */}
+            {(() => {
+              const activeLtTopic = ltTopics.find((t) => t.is_unlocked);
+              if (!activeLtTopic) {
+                return (
+                  <Card className="p-6 bg-zinc-950 border-zinc-800 shadow-xl flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500">
+                        <Mic className="w-5 h-5 text-zinc-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">No Speaker Currently On Air</h3>
+                        <p className="text-xs text-zinc-400">
+                          Click "Unlock" next to any participant below to put them on air, start their timer, and open topic guessing buzzer.
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              }
+
+              const answeringTeam = teams.find((t) => t.id === activeLtTopic.current_answering_team_id);
+
+              return (
+                <Card className="p-6 bg-zinc-950 border-zinc-700 shadow-2xl relative overflow-hidden space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-emerald-950 text-emerald-400 border-emerald-800 text-xs font-bold">
+                          ● ON AIR SPEAKER
+                        </Badge>
+                        <span className="text-xs font-mono text-zinc-400">
+                          {activeLtTopic.id}
+                        </span>
+                      </div>
+                      <h3 className="text-xl font-black text-white mt-1">
+                        Speaker: {activeLtTopic.assigned_user_name || "Assigned User"}
+                        {activeLtTopic.assigned_team_name ? (
+                          <span className="text-zinc-400 text-sm font-medium ml-2">({activeLtTopic.assigned_team_name})</span>
+                        ) : null}
+                      </h3>
+                      <p className="text-sm font-bold text-emerald-400 mt-0.5">
+                        Topic: <span className="text-white underline">{activeLtTopic.topic_name}</span>
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!activeLtTopic.is_buzzer_open ? (
+                        <Button
+                          onClick={() => handleOpenLightningBuzzer(activeLtTopic.id)}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs gap-1.5 shadow"
+                        >
+                          <Zap className="w-4 h-4 fill-white" />
+                          Open Buzzer for Topic Guessing
+                        </Button>
+                      ) : (
+                        <Badge className="bg-rose-950 text-rose-300 border-rose-800 text-xs font-bold animate-pulse px-3 py-1.5">
+                          🚨 BUZZER OPEN FOR GUESSING (MAX 3)
+                        </Badge>
+                      )}
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleResetLightningBuzzer(activeLtTopic.id)}
+                        className="text-xs border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                      >
+                        Reset Buzzer Queue
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Prohibited words reminder */}
+                  {activeLtTopic.prohibited_words && activeLtTopic.prohibited_words.length > 0 && (
+                    <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center gap-2 text-xs">
+                      <span className="font-bold text-rose-400">Prohibited Words:</span>
+                      <span className="text-zinc-300 font-mono">{activeLtTopic.prohibited_words.join(", ")}</span>
+                    </div>
+                  )}
+
+                  {/* Buzzer Race & Grading Queue */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+                    {/* Live Buzzer Queue */}
+                    <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-3">
+                      <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center justify-between">
+                        <span>Live Buzzer Queue (Top 3)</span>
+                        <span className="font-mono text-zinc-400">
+                          {ltBuzzerQueue?.buzzers?.length || 0} / 3 Teams
+                        </span>
+                      </h4>
+
+                      {!ltBuzzerQueue || ltBuzzerQueue.buzzers.length === 0 ? (
+                        <p className="text-xs text-zinc-500 py-4 text-center">
+                          {activeLtTopic.is_buzzer_open
+                            ? "Waiting for audience teams to press their buzzer..."
+                            : "Click 'Open Buzzer for Topic Guessing' when speaker finishes their talk."}
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {ltBuzzerQueue.buzzers.map((b) => (
+                            <div
+                              key={b.id}
+                              className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
+                                activeLtTopic.current_answering_position === b.position
+                                  ? "bg-amber-950/40 border-amber-500/80 text-white font-bold"
+                                  : "bg-zinc-900 border-zinc-800 text-zinc-300"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className={`w-6 h-6 rounded-full flex items-center justify-center font-mono font-bold text-xs ${
+                                  b.position === 1 ? "bg-amber-400 text-black" : b.position === 2 ? "bg-zinc-300 text-black" : "bg-amber-800 text-white"
+                                }`}>
+                                  #{b.position}
+                                </span>
+                                <span>{b.team_name}</span>
+                              </div>
+                              {activeLtTopic.current_answering_position === b.position ? (
+                                <Badge className="bg-amber-400 text-black text-[10px] font-extrabold">
+                                  Current Turn
+                                </Badge>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Active Answering Opportunity & Scoring Controls */}
+                    <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col justify-between space-y-3">
+                      <div>
+                        <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                          Guess Evaluation (+10 Correct / -5 Incorrect)
+                        </h4>
+
+                        {activeLtTopic.current_answering_team_id && answeringTeam ? (
+                          <div className="mt-3 p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
+                            <p className="text-xs text-zinc-400">
+                              Currently Answering:{" "}
+                              <strong className="text-white text-sm">
+                                {answeringTeam.team_name} (Position #{activeLtTopic.current_answering_position})
+                              </strong>
+                            </p>
+                            <p className="text-[11px] text-zinc-400">
+                              Listen to the team's guessed technical topic name.
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-zinc-500 mt-4">
+                            No team is currently at the answering stage.
+                          </p>
+                        )}
+                      </div>
+
+                      {activeLtTopic.current_answering_team_id && activeLtTopic.current_answering_position ? (
+                        <div className="flex items-center gap-3 pt-2">
+                          <Button
+                            disabled={isEvaluatingLtGuess}
+                            onClick={() =>
+                              handleEvaluateLightningGuess(
+                                activeLtTopic.id,
+                                activeLtTopic.current_answering_team_id!,
+                                activeLtTopic.current_answering_position!,
+                                true
+                              )
+                            }
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs gap-1 shadow"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            Correct (+10 pts)
+                          </Button>
+
+                          <Button
+                            disabled={isEvaluatingLtGuess}
+                            onClick={() =>
+                              handleEvaluateLightningGuess(
+                                activeLtTopic.id,
+                                activeLtTopic.current_answering_team_id!,
+                                activeLtTopic.current_answering_position!,
+                                false
+                              )
+                            }
+                            className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs gap-1 shadow"
+                          >
+                            <XCircle className="w-4 h-4" />
+                            Incorrect (-5 pts)
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })()}
 
             {/* Created Topics & Topic Pool Section */}
             <Card className="p-6 bg-zinc-950 border-zinc-800 shadow-xl space-y-4">
