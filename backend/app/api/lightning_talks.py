@@ -318,33 +318,70 @@ def unlock_topic(
 ):
     """Admin unlocks the topic for the designated participant.
     
-    All other topics are locked. 1-minute countdown begins.
+    All other topics are locked. Automatically opens topic guessing buzzer for audience.
     """
     topic = db.query(LightningTalkTopic).filter(LightningTalkTopic.id == topic_id).first()
     if not topic:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
 
-    # Lock all topics
-    db.query(LightningTalkTopic).update({LightningTalkTopic.is_unlocked: False})
+    # Lock all topics and their buzzers
+    db.query(LightningTalkTopic).update({
+        LightningTalkTopic.is_unlocked: False,
+        LightningTalkTopic.is_buzzer_open: False,
+    })
 
-    # Unlock target topic
+    # Unlock target topic and open the topic guessing buzzer
     topic.is_unlocked = True
     topic.unlocked_at = utc_now()
+    topic.is_buzzer_open = True
+    topic.is_completed = False
+    topic.current_answering_team_id = None
+    topic.current_answering_position = None
+
+    # Clear previous buzzer records for this topic so round begins clean
+    db.query(LightningTalkBuzzer).filter(LightningTalkBuzzer.topic_id == topic_id).delete()
 
     state = db.query(GameState).filter(GameState.id == 1).first()
     if state:
         state.active_lightning_user_id = topic.assigned_user_id
+        state.is_buzzer_open = True
         state.updated_at = utc_now()
 
     db.commit()
     db.refresh(topic)
 
     return {
-        "message": f"Topic '{topic.topic_name}' unlocked for {topic.assigned_user.display_name if topic.assigned_user else 'speaker'}",
+        "message": f"Topic '{topic.topic_name}' unlocked and buzzer opened for guessing!",
         "topic_id": topic.id,
         "topic_name": topic.topic_name,
         "assigned_user_id": topic.assigned_user_id,
         "duration_seconds": topic.duration_seconds,
+        "is_buzzer_open": True,
+    }
+
+
+@router.post("/lock-buzzer/{topic_id}")
+def lock_lightning_buzzer(
+    topic_id: str,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin manually locks the buzzer for this topic."""
+    topic = db.query(LightningTalkTopic).filter(LightningTalkTopic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+
+    topic.is_buzzer_open = False
+    state = db.query(GameState).filter(GameState.id == 1).first()
+    if state:
+        state.is_buzzer_open = False
+        state.updated_at = utc_now()
+
+    db.commit()
+    return {
+        "message": f"Buzzer locked for topic '{topic.topic_name}'",
+        "topic_id": topic.id,
+        "is_buzzer_open": False,
     }
 
 

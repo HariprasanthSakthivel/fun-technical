@@ -178,8 +178,21 @@ export async function fetchAllParticipants(): Promise<UserProfile[]> {
   return request<UserProfile[]>("/api/auth/all-participants");
 }
 
-export async function resetDatabase(): Promise<{ message: string }> {
-  return request<{ message: string }>("/api/auth/reset-database", {
+export async function resetDatabase(target: "users" | "questions" | "all" = "all"): Promise<{ message: string; target?: string }> {
+  return request<{ message: string; target?: string }>("/api/auth/reset-database", {
+    method: "POST",
+    body: JSON.stringify({ target }),
+  });
+}
+
+export async function resetUsers(): Promise<{ message: string; target?: string }> {
+  return request<{ message: string; target?: string }>("/api/auth/reset-users", {
+    method: "POST",
+  });
+}
+
+export async function resetQuestions(): Promise<{ message: string; target?: string }> {
+  return request<{ message: string; target?: string }>("/api/auth/reset-questions", {
     method: "POST",
   });
 }
@@ -376,6 +389,12 @@ export async function editLightningScore(teamId: string, score: number): Promise
 
 export async function openLightningBuzzer(topicId: string): Promise<{ message: string; topic_id: string; is_buzzer_open: boolean }> {
   return request(`/api/lightning-talks/open-buzzer/${topicId}`, {
+    method: "POST",
+  });
+}
+
+export async function lockLightningBuzzer(topicId: string): Promise<{ message: string; topic_id: string; is_buzzer_open: boolean }> {
+  return request(`/api/lightning-talks/lock-buzzer/${topicId}`, {
     method: "POST",
   });
 }

@@ -10,6 +10,7 @@ import {
   Edit2,
   Gamepad2,
   Hash,
+  HelpCircle,
   Image as ImageIcon,
   Layers,
   Lock,
@@ -17,6 +18,7 @@ import {
   Mic,
   Play,
   Plus,
+  RotateCcw,
   Save,
   Shuffle,
   Sparkles,
@@ -80,6 +82,7 @@ import {
   fetchTechDetectiveLeaderboard,
   fetchTechDetectiveQuestionsAdmin,
   fetchTechDetectiveScoreBreakdown,
+  lockLightningBuzzer,
   manualAssignLightningTopic,
   openLightningBuzzer,
   randomizeTeams,
@@ -1057,6 +1060,17 @@ export function AdminDashboardPage() {
     }
   };
 
+  // Lock Game 2 Buzzer
+  const handleLockLightningBuzzer = async (topicId: string) => {
+    try {
+      const res = await lockLightningBuzzer(topicId);
+      showNotice(res.message);
+      syncDashboardData();
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : "Failed to lock buzzer");
+    }
+  };
+
   // Evaluate Game 2 Guess attempt (+10 for Correct, -5 for Incorrect)
   const handleEvaluateLightningGuess = async (
     topicId: string,
@@ -1110,17 +1124,21 @@ export function AdminDashboardPage() {
     }
   };
 
-  const handleConfirmResetDb = async () => {
+  const [resetTargetInProgress, setResetTargetInProgress] = useState<"users" | "questions" | "all" | null>(null);
+
+  const handlePerformReset = async (target: "users" | "questions" | "all") => {
     try {
+      setResetTargetInProgress(target);
       setIsResettingDb(true);
-      const res = await resetDatabase();
+      const res = await resetDatabase(target);
       showNotice(res.message);
       setResetDbModalOpen(false);
       await syncDashboardData();
     } catch (err: unknown) {
-      showNotice(err instanceof Error ? err.message : "Failed to reset database");
+      showNotice(err instanceof Error ? err.message : `Failed to reset ${target}`);
     } finally {
       setIsResettingDb(false);
+      setResetTargetInProgress(null);
     }
   };
 
@@ -1199,10 +1217,10 @@ export function AdminDashboardPage() {
             size="sm"
             onClick={() => setResetDbModalOpen(true)}
             className="text-xs text-rose-400 hover:text-white hover:bg-rose-950/60 border border-rose-900/60 gap-1.5"
-            title="Clear all participants, teams, questions, and topics"
+            title="Reset options for users, questions, or entire database"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            Reset DB
+            <RotateCcw className="w-3.5 h-3.5" />
+            Reset Options
           </Button>
 
           <Button
@@ -2156,7 +2174,15 @@ export function AdminDashboardPage() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      {!activeLtTopic.is_buzzer_open ? (
+                      {activeLtTopic.is_buzzer_open ? (
+                        <Button
+                          onClick={() => handleLockLightningBuzzer(activeLtTopic.id)}
+                          className="bg-rose-600 hover:bg-rose-500 text-white font-black text-xs gap-1.5 shadow"
+                        >
+                          <Lock className="w-4 h-4" />
+                          Buzzer is OPEN (Click to Lock)
+                        </Button>
+                      ) : (
                         <Button
                           onClick={() => handleOpenLightningBuzzer(activeLtTopic.id)}
                           className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs gap-1.5 shadow"
@@ -2164,10 +2190,6 @@ export function AdminDashboardPage() {
                           <Zap className="w-4 h-4 fill-white" />
                           Open Buzzer for Topic Guessing
                         </Button>
-                      ) : (
-                        <Badge className="bg-rose-950 text-rose-300 border-rose-800 text-xs font-bold animate-pulse px-3 py-1.5">
-                          🚨 BUZZER OPEN FOR GUESSING (MAX 3)
-                        </Badge>
                       )}
 
                       <Button
@@ -2376,15 +2398,37 @@ export function AdminDashboardPage() {
 
                       <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
                         {topic.assigned_user_id ? (
-                          <Button
-                            size="sm"
-                            variant={topic.is_unlocked ? "secondary" : "outline"}
-                            onClick={() => handleUnlockTopic(topic.id)}
-                            className="h-7 text-xs px-2 gap-1 border-zinc-700"
-                          >
-                            <Unlock className="w-3 h-3" />
-                            {topic.is_unlocked ? "On Air" : "Unlock"}
-                          </Button>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant={topic.is_unlocked ? "secondary" : "outline"}
+                              onClick={() => handleUnlockTopic(topic.id)}
+                              className="h-7 text-xs px-2 gap-1 border-zinc-700"
+                            >
+                              <Unlock className="w-3 h-3" />
+                              {topic.is_unlocked ? "On Air" : "Unlock"}
+                            </Button>
+
+                            {topic.is_unlocked && (
+                              <Button
+                                size="sm"
+                                variant={topic.is_buzzer_open ? "default" : "outline"}
+                                onClick={() =>
+                                  topic.is_buzzer_open
+                                    ? handleLockLightningBuzzer(topic.id)
+                                    : handleOpenLightningBuzzer(topic.id)
+                                }
+                                className={`h-7 text-[11px] px-2 gap-1 ${
+                                  topic.is_buzzer_open
+                                    ? "bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                                    : "border-amber-600 text-amber-400 hover:bg-amber-950"
+                                }`}
+                              >
+                                <Bell className="w-3 h-3" />
+                                {topic.is_buzzer_open ? "Buzzer Open" : "Open Buzzer"}
+                              </Button>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-[10px] text-zinc-500 italic">Available in Pool</span>
                         )}
@@ -3862,42 +3906,120 @@ export function AdminDashboardPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL: Confirm Reset Database */}
+      {/* MODAL: Platform Reset Center (Options for Users vs Questions vs All) */}
       <Dialog open={resetDbModalOpen} onOpenChange={setResetDbModalOpen}>
-        <DialogContent className="max-w-md bg-zinc-950 border-zinc-800 text-white">
+        <DialogContent className="max-w-xl bg-zinc-950 border-zinc-800 text-white shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold text-rose-400 flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-rose-500" />
-              Reset Database & Clean Slate
+            <DialogTitle className="text-xl font-black text-white flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-amber-400" />
+              Platform Reset Options
             </DialogTitle>
-            <DialogDescription className="text-xs text-zinc-400 space-y-2 pt-1">
-              <p>Are you sure you want to clear all data? This will permanently remove:</p>
-              <ul className="list-disc list-inside space-y-1 text-zinc-300 font-mono text-[11px] bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-800">
-                <li>All registered participants & online sessions</li>
-                <li>All formed teams and team scores</li>
-                <li>All uploaded Tech Detective questions & clue images</li>
-                <li>All Lightning Talks topics & speech scores</li>
-              </ul>
-              <p className="text-zinc-500 text-[11px]">
-                The administrator account (<strong>admin / admin123</strong>) remains active.
-              </p>
+            <DialogDescription className="text-xs text-zinc-400 pt-1">
+              Choose specifically what you need to reset for your activity.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="pt-3 border-t border-zinc-800">
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-3">
+            {/* OPTION 1: Reset Users Only */}
+            <div className="p-4 rounded-xl bg-zinc-900/70 border border-zinc-800 hover:border-sky-500/50 transition-all flex flex-col justify-between space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="w-9 h-9 rounded-lg bg-sky-950/80 border border-sky-800/80 flex items-center justify-center text-sky-400">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <Badge variant="muted" className="text-[10px] text-emerald-400 bg-emerald-950/50 border-emerald-800/60">
+                    Questions Preserved
+                  </Badge>
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Reset Users & Teams</h4>
+                  <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                    Clears all registered participants, active login sessions, formed teams, and team scores.
+                  </p>
+                </div>
+                <div className="text-[10px] font-mono text-zinc-500 space-y-0.5">
+                  <p>✓ Keeps Tech Detective questions & clue images</p>
+                  <p>✓ Keeps Lightning Talks topics & rules</p>
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                onClick={() => handlePerformReset("users")}
+                disabled={isResettingDb}
+                className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs gap-1.5 shadow-md shadow-sky-600/20"
+              >
+                <Users className="w-3.5 h-3.5" />
+                {resetTargetInProgress === "users" ? "Resetting Users..." : "Reset Users Only"}
+              </Button>
+            </div>
+
+            {/* OPTION 2: Reset Questions Only */}
+            <div className="p-4 rounded-xl bg-zinc-900/70 border border-zinc-800 hover:border-amber-500/50 transition-all flex flex-col justify-between space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="w-9 h-9 rounded-lg bg-amber-950/80 border border-amber-800/80 flex items-center justify-center text-amber-400">
+                    <HelpCircle className="w-5 h-5" />
+                  </div>
+                  <Badge variant="muted" className="text-[10px] text-emerald-400 bg-emerald-950/50 border-emerald-800/60">
+                    Users Preserved
+                  </Badge>
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Reset Questions & Topics</h4>
+                  <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                    Clears all Tech Detective questions, clue images, Lightning Talk topics, and custom challenges.
+                  </p>
+                </div>
+                <div className="text-[10px] font-mono text-zinc-500 space-y-0.5">
+                  <p>✓ Keeps registered participants & login sessions</p>
+                  <p>✓ Keeps formed teams (resets scores to 0)</p>
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                onClick={() => handlePerformReset("questions")}
+                disabled={isResettingDb}
+                className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold text-xs gap-1.5 shadow-md shadow-amber-600/20"
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-black" />
+                {resetTargetInProgress === "questions" ? "Resetting Questions..." : "Reset Questions Only"}
+              </Button>
+            </div>
+          </div>
+
+          {/* OPTION 3: Full Reset */}
+          <div className="p-3 rounded-xl bg-rose-950/20 border border-rose-900/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="space-y-0.5 text-left">
+              <p className="font-bold text-rose-300 flex items-center gap-1.5">
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                Full System Reset (Clean Slate)
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Wipes both users and questions. Admin account (<span className="text-zinc-300 font-mono">admin</span>) remains safe.
+              </p>
+            </div>
             <Button
+              type="button"
+              variant="outline"
+              onClick={() => handlePerformReset("all")}
+              disabled={isResettingDb}
+              className="border-rose-800 bg-rose-950/40 text-rose-300 hover:bg-rose-900 hover:text-white text-xs font-bold shrink-0 gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {resetTargetInProgress === "all" ? "Wiping..." : "Reset Everything"}
+            </Button>
+          </div>
+
+          <DialogFooter className="pt-2 border-t border-zinc-800">
+            <Button
+              type="button"
               variant="ghost"
               onClick={() => setResetDbModalOpen(false)}
               className="text-zinc-400 hover:text-white"
             >
               Cancel
-            </Button>
-            <Button
-              onClick={handleConfirmResetDb}
-              disabled={isResettingDb}
-              className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs gap-1.5"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              {isResettingDb ? "Resetting..." : "Yes, Clear Database"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -12,7 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_admin
-from app.models.models import Team, User
+from app.models.models import (
+    GameQuestionBuzzer,
+    LightningTalkBuzzer,
+    Team,
+    TechDetectiveBuzzer,
+    User,
+)
 from app.schemas.schemas import RandomizeTeamsRequest, TeamMemberInfo, TeamNameUpdate, TeamResponse
 
 router = APIRouter(prefix="/teams", tags=["Teams"])
@@ -188,17 +194,44 @@ def update_team_name(
     db: Session = Depends(get_db),
 ):
     """Update team name. Allowed by Admin OR members of that team."""
-    team = db.query(Team).filter(Team.id == team_id).first()
+    clean_id = team_id.strip()
+    if clean_id.lower() == "my-team":
+        if not current_user.team_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You have not been assigned to a team yet.",
+            )
+        team = db.query(Team).filter(Team.id == current_user.team_id).first()
+    else:
+        team = db.query(Team).filter(Team.id.ilike(clean_id)).first()
+
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    if current_user.role != "admin" and current_user.team_id != team_id:
+    is_team_member = (
+        (current_user.team_id and current_user.team_id.strip().upper() == team.id.strip().upper())
+        or any(m.id == current_user.id for m in team.members)
+    )
+    if current_user.role != "admin" and not is_team_member:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only edit your own team's name",
         )
 
-    team.team_name = payload.team_name.strip()
+    new_name = payload.team_name.strip()
+    team.team_name = new_name
+
+    # Cascade updated team name to any active/past buzzer queues
+    db.query(TechDetectiveBuzzer).filter(TechDetectiveBuzzer.team_id == team.id).update(
+        {TechDetectiveBuzzer.team_name: new_name}
+    )
+    db.query(LightningTalkBuzzer).filter(LightningTalkBuzzer.team_id == team.id).update(
+        {LightningTalkBuzzer.team_name: new_name}
+    )
+    db.query(GameQuestionBuzzer).filter(GameQuestionBuzzer.team_id == team.id).update(
+        {GameQuestionBuzzer.team_name: new_name}
+    )
+
     db.commit()
     db.refresh(team)
     return serialize_team(team)

@@ -206,9 +206,34 @@ def test_edit_team_name():
     admin_token = get_token("admin", "admin123")
     headers = {"Authorization": f"Bearer {admin_token}"}
 
+    # 1. Admin can edit any team name
     res = client.put("/api/teams/T01/name", json={"team_name": "Cyber Hawks"}, headers=headers)
     assert res.status_code == 200
     assert res.json()["team_name"] == "Cyber Hawks"
+
+    # 2. Participant can edit their own team's name (via ID and via 'my-team')
+    u1_token = get_token("user1", "pass123")
+    u1_headers = {"Authorization": f"Bearer {u1_token}"}
+    my_team_res = client.get("/api/teams/my-team", headers=u1_headers)
+    assert my_team_res.status_code == 200
+    u1_team = my_team_res.json()
+    u1_team_id = u1_team["id"]
+
+    res_part = client.put(f"/api/teams/{u1_team_id}/name", json={"team_name": "Pixel Warriors"}, headers=u1_headers)
+    assert res_part.status_code == 200
+    assert res_part.json()["team_name"] == "Pixel Warriors"
+
+    # Also works via /api/teams/my-team/name
+    res_my_team = client.put("/api/teams/my-team/name", json={"team_name": "Cyber Mavericks"}, headers=u1_headers)
+    assert res_my_team.status_code == 200
+    assert res_my_team.json()["team_name"] == "Cyber Mavericks"
+
+    # 3. Participant cannot edit a different team
+    other_team_res = client.get("/api/teams")
+    other_team = next(t for t in other_team_res.json() if t["id"] != u1_team_id)
+    res_forbidden = client.put(f"/api/teams/{other_team['id']}/name", json={"team_name": "Hacked Name"}, headers=u1_headers)
+    assert res_forbidden.status_code == 403
+    assert "You can only edit your own team's name" in res_forbidden.json()["detail"]
 
 
 def test_tech_detective_unlock_and_confidentiality():
@@ -642,16 +667,22 @@ def test_lightning_talks_buzzer_and_scoring():
 
     unlock_res = client.post(f"/api/lightning-talks/unlock/{topic_id}", headers=admin_headers)
     assert unlock_res.status_code == 200
+    assert unlock_res.json()["is_buzzer_open"] is True
 
-    # 1. Before admin opens buzzer, audience buzzing fails
-    buzz_early = client.post(
+    # 1. Admin can lock the buzzer while speaker is talking
+    lock_res = client.post(f"/api/lightning-talks/lock-buzzer/{topic_id}", headers=admin_headers)
+    assert lock_res.status_code == 200
+    assert lock_res.json()["is_buzzer_open"] is False
+
+    # While locked, audience buzzing fails
+    buzz_locked = client.post(
         "/api/lightning-talks/buzz",
         headers={"Authorization": f"Bearer {audience_u2_token}"},
     )
-    assert buzz_early.status_code == 400
-    assert "Buzzer is currently locked or topic guessing has not opened yet" in buzz_early.json()["detail"]
+    assert buzz_locked.status_code == 400
+    assert "Buzzer is currently locked or topic guessing has not opened yet" in buzz_locked.json()["detail"]
 
-    # 2. Admin opens buzzer for topic
+    # 2. Admin opens buzzer for topic guessing
     open_res = client.post(
         f"/api/lightning-talks/open-buzzer/{topic_id}",
         headers=admin_headers,
@@ -749,5 +780,70 @@ def test_lightning_talks_buzzer_and_scoring():
     teams_after_eval2 = client.get("/api/teams").json()
     t3_score_after = next(t["lightning_talks_score"] for t in teams_after_eval2 if t["id"] == t3["id"])
     assert t3_score_after == t3_score_before + 10
+
+
+def test_reset_users_preserves_questions():
+    admin_token = get_token("admin", "admin123")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Ensure a question exists
+    q_res = client.get("/api/tech-detective/questions/admin", headers=admin_headers)
+    assert q_res.status_code == 200
+    initial_q_count = len(q_res.json())
+
+    # Ensure participants and teams exist
+    client.post("/api/teams/randomize", json={"team_size": 2, "include_all": True}, headers=admin_headers)
+    teams_before = client.get("/api/teams").json()
+    assert len(teams_before) > 0
+
+    # Reset USERS only
+    reset_res = client.post(
+        "/api/auth/reset-database",
+        json={"target": "users"},
+        headers=admin_headers,
+    )
+    assert reset_res.status_code == 200
+    assert reset_res.json()["target"] == "users"
+
+    # Verify participants and teams are cleared
+    teams_after = client.get("/api/teams").json()
+    assert len(teams_after) == 0
+
+    # Verify questions are PRESERVED!
+    q_after = client.get("/api/tech-detective/questions/admin", headers=admin_headers)
+    assert q_after.status_code == 200
+    assert len(q_after.json()) == initial_q_count
+
+
+def test_reset_questions_preserves_users():
+    admin_token = get_token("admin", "admin123")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Register 2 users and randomize into team
+    client.post("/api/auth/register", json={"username": "reset_u1", "display_name": "Reset U1", "password": "pass"})
+    client.post("/api/auth/register", json={"username": "reset_u2", "display_name": "Reset U2", "password": "pass"})
+    client.post("/api/teams/randomize", json={"team_size": 2, "include_all": True}, headers=admin_headers)
+
+    teams_before = client.get("/api/teams").json()
+    assert len(teams_before) > 0
+
+    # Reset QUESTIONS only
+    reset_res = client.post(
+        "/api/auth/reset-database",
+        json={"target": "questions"},
+        headers=admin_headers,
+    )
+    assert reset_res.status_code == 200
+    assert reset_res.json()["target"] == "questions"
+
+    # Verify questions and topics are cleared
+    q_after = client.get("/api/tech-detective/questions/admin", headers=admin_headers)
+    assert len(q_after.json()) == 0
+
+    # Verify teams and users are PRESERVED!
+    teams_after = client.get("/api/teams").json()
+    assert len(teams_after) == len(teams_before)
+    # Team scores were reset to 0
+    assert teams_after[0]["total_score"] == 0
 
 

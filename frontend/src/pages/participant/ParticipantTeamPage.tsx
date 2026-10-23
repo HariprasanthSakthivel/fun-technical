@@ -30,7 +30,7 @@ import type { GameItem, Team } from "@/types";
 
 export function ParticipantTeamPage() {
   const navigate = useNavigate();
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, refreshProfile } = useAuth();
 
   const [team, setTeam] = useState<Team | null>(null);
   const [customGames, setCustomGames] = useState<GameItem[]>([]);
@@ -50,7 +50,10 @@ export function ParticipantTeamPage() {
         fetchGames().catch(() => [] as GameItem[]),
       ]);
       setTeam(data);
-      setNewTeamName(data.team_name);
+      // Only set initial name if not currently editing in modal
+      if (!isEditDialogOpen) {
+        setNewTeamName((prev) => (prev ? prev : data.team_name));
+      }
       setCustomGames(
         allGames.filter(
           (g) => g.game_code !== "tech-detective" && g.game_code !== "lightning-talks"
@@ -77,9 +80,12 @@ export function ParticipantTeamPage() {
     if (!team || !newTeamName.trim()) return;
     try {
       setIsSavingName(true);
+      setErrorMsg(null);
       const updated = await updateTeamName(team.id, newTeamName.trim());
       setTeam(updated);
+      setNewTeamName(updated.team_name);
       setIsEditDialogOpen(false);
+      await refreshProfile();
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to update team name");
     } finally {
@@ -196,7 +202,11 @@ export function ParticipantTeamPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setIsEditDialogOpen(true)}
+                      onClick={() => {
+                        setNewTeamName(team.team_name);
+                        setErrorMsg(null);
+                        setIsEditDialogOpen(true);
+                      }}
                       className="h-8 w-8 p-0 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg"
                       title="Edit Team Name"
                     >
@@ -397,41 +407,51 @@ export function ParticipantTeamPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {errorMsg && (
-            <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSaveTeamName();
+            }}
+            className="space-y-4"
+          >
+            {errorMsg && (
+              <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            <div className="py-1">
+              <Input
+                value={newTeamName}
+                onChange={(e) => setNewTeamName(e.target.value)}
+                placeholder="e.g. AI Titans"
+                className="bg-zinc-900 border-zinc-800 text-white font-semibold"
+                maxLength={64}
+                autoFocus
+              />
             </div>
-          )}
 
-          <div className="py-2">
-            <Input
-              value={newTeamName}
-              onChange={(e) => setNewTeamName(e.target.value)}
-              placeholder="e.g. AI Titans"
-              className="bg-zinc-900 border-zinc-800 text-white"
-              maxLength={64}
-            />
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsEditDialogOpen(false)}
-              className="border-zinc-700 text-zinc-400"
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleSaveTeamName}
-              disabled={isSavingName || !newTeamName.trim()}
-              className="bg-white text-black hover:bg-zinc-200 font-bold"
-            >
-              {isSavingName ? "Saving..." : "Save Team Name"}
-            </Button>
-          </DialogFooter>
+            <DialogFooter className="gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsEditDialogOpen(false)}
+                className="border-zinc-700 text-zinc-400 hover:text-white"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={isSavingName || !newTeamName.trim()}
+                className="bg-white text-black hover:bg-zinc-200 font-bold"
+              >
+                {isSavingName ? "Saving..." : "Save Team Name"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

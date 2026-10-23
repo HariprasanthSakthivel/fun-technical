@@ -45,6 +45,10 @@ class UserResponse(BaseModel):
     team_name: str | None = None
 
 
+class ResetDatabaseRequest(BaseModel):
+    target: Literal["users", "questions", "all"] = "all"
+
+
 # ── Team Schemas ───────────────────────────────────────────────────────────────
 
 class TeamMemberInfo(BaseModel):

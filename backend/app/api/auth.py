@@ -8,15 +8,26 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_current_user_optional, require_admin
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.models import (
+    GameQuestion,
+    GameQuestionBuzzer,
     GameState,
+    LightningTalkBuzzer,
+    LightningTalkScore,
     LightningTalkTopic,
     Team,
+    TeamGameScore,
     TechDetectiveAnswer,
     TechDetectiveBuzzer,
     TechDetectiveQuestion,
     User,
 )
-from app.schemas.schemas import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from app.schemas.schemas import (
+    LoginRequest,
+    RegisterRequest,
+    ResetDatabaseRequest,
+    TokenResponse,
+    UserResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication & Participants"])
 
@@ -241,16 +252,132 @@ def get_all_participants(
     return result
 
 
-@router.post("/reset-database")
-def reset_database_endpoint(
+@router.post("/reset-users")
+def reset_users_endpoint(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin endpoint: Clear all participants, teams, questions, and topics for a fresh activity."""
+    """Admin endpoint: Clear all participants, formed teams, and user scores, keeping questions & topics intact."""
+    # 1. Clear participant buzzers & answers
+    db.query(TechDetectiveBuzzer).delete()
+    db.query(TechDetectiveAnswer).delete()
+    db.query(LightningTalkBuzzer).delete()
+    db.query(LightningTalkScore).delete()
+    db.query(GameQuestionBuzzer).delete()
+    db.query(TeamGameScore).delete()
+
+    # 2. Reset active assignment/unlock states on topics and questions
+    db.query(TechDetectiveQuestion).update({TechDetectiveQuestion.is_unlocked: False})
+    db.query(LightningTalkTopic).update({
+        LightningTalkTopic.assigned_user_id: None,
+        LightningTalkTopic.assigned_team_id: None,
+        LightningTalkTopic.is_unlocked: False,
+        LightningTalkTopic.is_buzzer_open: False,
+        LightningTalkTopic.current_answering_team_id: None,
+        LightningTalkTopic.current_answering_position: None,
+        LightningTalkTopic.is_completed: False,
+    })
+    db.query(GameQuestion).update({
+        GameQuestion.is_unlocked: False,
+        GameQuestion.is_completed: False,
+        GameQuestion.current_answering_team_id: None,
+        GameQuestion.current_answering_position: None,
+    })
+
+    # 3. Delete participants and teams
+    db.query(User).filter(User.role == "participant").delete()
+    db.query(Team).delete()
+
+    # 4. Reset game state to lobby
+    state = db.query(GameState).filter(GameState.id == 1).first()
+    if state:
+        state.current_game = "lobby"
+        state.is_buzzer_open = False
+        state.active_question_id = None
+        state.active_topic_id = None
+        state.current_answering_team_id = None
+        state.current_answering_position = None
+
+    db.commit()
+    return {
+        "success": True,
+        "target": "users",
+        "message": "Participants and teams have been reset successfully! All questions and topics were preserved.",
+    }
+
+
+@router.post("/reset-questions")
+def reset_questions_endpoint(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin endpoint: Clear all questions, clues, and topics, keeping participants & teams intact."""
+    # 1. Clear buzzers & answers
+    db.query(TechDetectiveBuzzer).delete()
+    db.query(TechDetectiveAnswer).delete()
+    db.query(LightningTalkBuzzer).delete()
+    db.query(LightningTalkScore).delete()
+    db.query(GameQuestionBuzzer).delete()
+    db.query(TeamGameScore).delete()
+
+    # 2. Delete all questions and topics
+    db.query(TechDetectiveQuestion).delete()
+    db.query(LightningTalkTopic).delete()
+    db.query(GameQuestion).delete()
+
+    # 3. Reset team scores back to 0 so teams are ready for new questions
+    teams = db.query(Team).all()
+    for t in teams:
+        t.tech_detective_score = 0
+        t.lightning_talks_score = 0
+        t.total_score = 0
+
+    # 4. Reset game state
+    state = db.query(GameState).filter(GameState.id == 1).first()
+    if state:
+        state.is_buzzer_open = False
+        state.active_question_id = None
+        state.active_topic_id = None
+        state.current_answering_team_id = None
+        state.current_answering_position = None
+
+    db.commit()
+    return {
+        "success": True,
+        "target": "questions",
+        "message": "All questions and topics have been reset successfully! Teams and participants were preserved.",
+    }
+
+
+@router.post("/reset-database")
+def reset_database_endpoint(
+    payload: ResetDatabaseRequest | None = None,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin endpoint: Clear participants, teams, questions, and topics.
+    
+    Supports granular target via payload:
+    - 'users': Resets participants and teams only.
+    - 'questions': Resets questions and topics only.
+    - 'all': Resets both users and questions (full clean slate).
+    """
+    target = payload.target if payload else "all"
+    if target == "users":
+        return reset_users_endpoint(current_user, db)
+    elif target == "questions":
+        return reset_questions_endpoint(current_user, db)
+
+    # Full Reset ("all")
     db.query(TechDetectiveBuzzer).delete()
     db.query(TechDetectiveAnswer).delete()
     db.query(TechDetectiveQuestion).delete()
+    db.query(LightningTalkBuzzer).delete()
+    db.query(LightningTalkScore).delete()
     db.query(LightningTalkTopic).delete()
+    db.query(GameQuestionBuzzer).delete()
+    db.query(GameQuestion).delete()
+    db.query(TeamGameScore).delete()
     db.query(User).filter(User.role == "participant").delete()
     db.query(Team).delete()
 
@@ -258,10 +385,18 @@ def reset_database_endpoint(
     if state:
         state.current_game = "lobby"
         state.is_buzzer_open = False
+        state.active_question_id = None
+        state.active_topic_id = None
+        state.current_answering_team_id = None
+        state.current_answering_position = None
     else:
         state = GameState(id=1, current_game="lobby", is_buzzer_open=False)
         db.add(state)
 
     db.commit()
-    return {"message": "Database reset successfully! All participants, teams, and questions cleared."}
+    return {
+        "success": True,
+        "target": "all",
+        "message": "Database reset successfully! All participants, teams, and questions cleared.",
+    }
 
