@@ -233,11 +233,15 @@ def test_lightning_talks_topic_assignment_and_scoring():
     admin_token = get_token("admin", "admin123")
     headers = {"Authorization": f"Bearer {admin_token}"}
 
+    u1_token = get_token("user1", "pass123")
+    u1_profile = client.get("/api/auth/me", headers={"Authorization": f"Bearer {u1_token}"}).json()
+    u1_id = u1_profile["id"]
+
     # Admin manually assigns a topic to user 1 in team T01
     res = client.post(
         "/api/lightning-talks/manual-assign",
         json={
-            "user_id": 1,
+            "user_id": u1_id,
             "team_id": "T01",
             "topic_name": "Enterprise AI Orchestration",
             "prohibited_words": ["automation", "database"],
@@ -253,11 +257,29 @@ def test_lightning_talks_topic_assignment_and_scoring():
     res = client.post(f"/api/lightning-talks/unlock/{topic_id}", headers=headers)
     assert res.status_code == 200
 
+    # User 1 (assigned speaker) sees the topic and prohibited words
+    res_u1 = client.get("/api/lightning-talks/active-topic", headers={"Authorization": f"Bearer {u1_token}"})
+    assert res_u1.status_code == 200
+    u1_topic = res_u1.json()
+    assert u1_topic["is_my_turn"] is True
+    assert u1_topic["topic_name"] == "Enterprise AI Orchestration"
+    assert "automation" in u1_topic["prohibited_words"]
+
+    # User 2 (audience/other participant) does NOT see the topic name or prohibited words
+    u2_token = get_token("user2", "pass123")
+    res_u2 = client.get("/api/lightning-talks/active-topic", headers={"Authorization": f"Bearer {u2_token}"})
+    assert res_u2.status_code == 200
+    u2_topic = res_u2.json()
+    assert u2_topic["is_my_turn"] is False
+    assert u2_topic["topic_name"] == ""  # Redacted!
+    assert u2_topic["prohibited_words"] == []  # Redacted!
+    assert u2_topic["active_speaker_name"] is not None
+
     # Evaluate speech on 3 criteria: Time=8, Words=9, Understandability=9 -> 26 pts
     res = client.post(
         "/api/lightning-talks/evaluate",
         json={
-            "user_id": 1,
+            "user_id": u1_id,
             "team_id": "T01",
             "topic_id": topic_id,
             "time_management_score": 8,

@@ -81,12 +81,13 @@ def get_topics_admin(_: User = Depends(require_admin), db: Session = Depends(get
 def get_my_active_topic(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    """Participant view: Returns the active unlocked topic assigned to this participant.
+    """Participant view: Returns topic ONLY if assigned to the current participant.
     
-    If it's another speaker's turn, returns the currently unlocked topic for audience view.
+    For all other participants (audience), topic details (name, prohibited words)
+    are strictly hidden and redacted so only the assigned speaker can see them.
     """
-    # First check if there is an unlocked topic for current participant
-    my_topic = (
+    # 1. Check if current user has an unlocked topic assigned directly to them
+    my_unlocked_topic = (
         db.query(LightningTalkTopic)
         .filter(
             LightningTalkTopic.assigned_user_id == current_user.id,
@@ -94,30 +95,57 @@ def get_my_active_topic(
         )
         .first()
     )
-    if my_topic:
+    if my_unlocked_topic:
         return LightningTopicParticipantResponse(
-            id=my_topic.id,
-            topic_name=my_topic.topic_name,
-            description=my_topic.description,
-            prohibited_words=my_topic.prohibited_words,
-            is_unlocked=my_topic.is_unlocked,
-            duration_seconds=my_topic.duration_seconds,
+            id=my_unlocked_topic.id,
+            topic_name=my_unlocked_topic.topic_name,
+            description=my_unlocked_topic.description,
+            prohibited_words=my_unlocked_topic.prohibited_words or [],
+            is_unlocked=my_unlocked_topic.is_unlocked,
+            duration_seconds=my_unlocked_topic.duration_seconds,
+            is_my_turn=True,
+            active_speaker_name=current_user.display_name,
+            active_speaker_team=current_user.team.team_name if current_user.team else None,
         )
 
-    # Otherwise check if any topic is currently unlocked globally
-    active_topic = (
+    # 2. Check if another speaker's topic is currently unlocked on stage
+    active_unlocked_topic = (
         db.query(LightningTalkTopic)
         .filter(LightningTalkTopic.is_unlocked.is_(True))
         .first()
     )
-    if active_topic:
+    if active_unlocked_topic and active_unlocked_topic.assigned_user_id != current_user.id:
+        speaker = active_unlocked_topic.assigned_user
+        team = active_unlocked_topic.assigned_team
         return LightningTopicParticipantResponse(
-            id=active_topic.id,
-            topic_name=active_topic.topic_name,
-            description=active_topic.description,
-            prohibited_words=active_topic.prohibited_words,
-            is_unlocked=active_topic.is_unlocked,
-            duration_seconds=active_topic.duration_seconds,
+            id=active_unlocked_topic.id,
+            topic_name="",  # STRICTLY REDACTED: Topic name hidden from other participants
+            description=None,  # STRICTLY REDACTED
+            prohibited_words=[],  # STRICTLY REDACTED: Taboo words hidden from other participants
+            is_unlocked=True,
+            duration_seconds=active_unlocked_topic.duration_seconds,
+            is_my_turn=False,
+            active_speaker_name=speaker.display_name if speaker else "Active Speaker",
+            active_speaker_team=team.team_name if team else None,
+        )
+
+    # 3. Check if current user has a topic assigned directly to them (even if not yet unlocked)
+    my_assigned_topic = (
+        db.query(LightningTalkTopic)
+        .filter(LightningTalkTopic.assigned_user_id == current_user.id)
+        .first()
+    )
+    if my_assigned_topic:
+        return LightningTopicParticipantResponse(
+            id=my_assigned_topic.id,
+            topic_name=my_assigned_topic.topic_name,
+            description=my_assigned_topic.description,
+            prohibited_words=my_assigned_topic.prohibited_words or [],
+            is_unlocked=my_assigned_topic.is_unlocked,
+            duration_seconds=my_assigned_topic.duration_seconds,
+            is_my_turn=True,
+            active_speaker_name=current_user.display_name,
+            active_speaker_team=current_user.team.team_name if current_user.team else None,
         )
 
     return None

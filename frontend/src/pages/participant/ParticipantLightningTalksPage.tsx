@@ -126,8 +126,8 @@ export function ParticipantLightningTalksPage() {
           {/* Synchronized Dynamic Game Timer */}
           <GameTimerWidget timer={gameTimer} currentGameContext="lightning-talks" />
 
-          {!activeTopic || !activeTopic.is_unlocked ? (
-            /* Waiting for admin to unlock topic */
+          {!activeTopic ? (
+            /* Waiting for admin to assign or unlock topic */
             <Card className="p-12 text-center bg-zinc-950 border-zinc-800 shadow-xl space-y-4">
               <div className="w-16 h-16 rounded-2xl bg-zinc-900 flex items-center justify-center mx-auto text-zinc-500">
                 <MicOff className="w-8 h-8 animate-pulse text-zinc-400" />
@@ -137,23 +137,92 @@ export function ParticipantLightningTalksPage() {
                   Waiting for Next Speaker
                 </h3>
                 <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                  The administrator will unlock the topic for each participant. Once unlocked, your assigned topic will be revealed here!
+                  The administrator will assign and unlock a topic when it's your turn to speak. Once assigned to you, your topic and prohibited words will appear here.
                 </p>
               </div>
             </Card>
+          ) : activeTopic.is_my_turn === false ? (
+            /* Audience View: Another speaker is on stage, topic is strictly hidden */
+            <div className="space-y-6 animate-in fade-in duration-300">
+              <Card className="p-8 bg-zinc-950 border-zinc-800 shadow-2xl relative overflow-hidden space-y-6">
+                <div className="flex items-center justify-between">
+                  <Badge variant="purple" className="text-xs uppercase font-extrabold tracking-wider bg-amber-400 text-black">
+                    ● Speaker On Stage
+                  </Badge>
+                  <span className="text-xs font-mono text-zinc-400">
+                    Listening Mode
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">
+                    Current Presenter
+                  </p>
+                  <h2 className="text-3xl font-black text-white tracking-tight">
+                    {activeTopic.active_speaker_name || "Active Participant"}
+                  </h2>
+                  {activeTopic.active_speaker_team && (
+                    <p className="text-sm font-bold text-zinc-300">
+                      Team: <span className="text-white">{activeTopic.active_speaker_team}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="p-4 rounded-xl bg-zinc-900/80 border border-zinc-800 space-y-2">
+                  <p className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    Confidential Topic (Hidden from Audience)
+                  </p>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    The speaker is explaining their technical concept right now without uttering forbidden buzzwords. Topic details and prohibited words are visible only to the speaker.
+                  </p>
+                </div>
+              </Card>
+
+              {/* Evaluation Criteria Explanation for audience */}
+              <Card className="p-6 bg-zinc-950 border-zinc-800 space-y-3">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-zinc-400" />
+                  What the Conductor Is Evaluating
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 text-xs">
+                  <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800">
+                    <p className="font-bold text-white">1. Time Management</p>
+                    <p className="text-[11px] text-zinc-400 mt-1">
+                      Optimal use of the 60-second timer window.
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800">
+                    <p className="font-bold text-white">2. Words Used</p>
+                    <p className="text-[11px] text-zinc-400 mt-1">
+                      Vocabulary and avoiding taboo topic names.
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800">
+                    <p className="font-bold text-white">3. Understandability</p>
+                    <p className="text-[11px] text-zinc-400 mt-1">
+                      Clarity and technical accuracy of description.
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            </div>
           ) : (
-            /* Active Unlocked Topic for Speaker */
+            /* Active Assigned Topic for Current Speaker Only */
             <div className="space-y-6 animate-in fade-in duration-300">
               <Card className="p-6 sm:p-8 bg-zinc-950 border-zinc-700 shadow-2xl relative overflow-hidden space-y-6">
                 <div className="flex items-center justify-between">
                   <Badge variant="purple" className="text-xs uppercase font-extrabold tracking-wider bg-white text-black">
-                    Active Topic Unlocked
+                    {activeTopic.is_unlocked ? "Active Topic Unlocked" : "Assigned to You"}
                   </Badge>
+                  <span className="text-xs font-mono text-emerald-400 font-bold">
+                    Your Turn to Speak!
+                  </span>
                 </div>
 
                 <div className="space-y-2">
                   <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">
-                    Assigned Topic
+                    Your Assigned Topic
                   </p>
                   <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
                     {activeTopic.topic_name}

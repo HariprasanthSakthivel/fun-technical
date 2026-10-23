@@ -156,6 +156,9 @@ export interface LightningTopicParticipant {
   prohibited_words: string[];
   is_unlocked: boolean;
   duration_seconds: number;
+  is_my_turn?: boolean;
+  active_speaker_name?: string | null;
+  active_speaker_team?: string | null;
 }
 
 export interface LightningLeaderboardItem {

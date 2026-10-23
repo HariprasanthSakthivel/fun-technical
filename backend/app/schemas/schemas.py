@@ -191,13 +191,16 @@ class LightningTopicAdminResponse(BaseModel):
 
 
 class LightningTopicParticipantResponse(BaseModel):
-    """Topic information provided to active speaker."""
+    """Topic information provided to active speaker or audience."""
     id: str
     topic_name: str
     description: str | None = None
     prohibited_words: list[str] = []
     is_unlocked: bool
     duration_seconds: int = 60
+    is_my_turn: bool = True
+    active_speaker_name: str | None = None
+    active_speaker_team: str | None = None
 
 
 class EvaluateLightningSpeechRequest(BaseModel):
